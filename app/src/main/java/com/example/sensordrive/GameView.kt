@@ -18,15 +18,14 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     var isGameOver = false
     private var isPaused = false
     private var showMenu = false
-    private var menuAlpha = 0f
     private var showScores = false
     private var isInitialized = false
 
-    // ── Paint ───────────────────────────────────────────────────────
+    // ── Paint & Pre-Allocated Objects ───────────────────────────────
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val pixelPaint = Paint().apply {
         typeface = Typeface.MONOSPACE
-        isAntiAlias = false
+        isAntiAlias = true // Ativado para os emojis (Raios) ficarem suaves
         isFilterBitmap = false
     }
     private val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -44,15 +43,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private data class MenuButton(val text: String, val x: Float, val y: Float, val width: Float, val height: Float, val color: Int, val action: () -> Unit)
     private val menuButtons = mutableListOf<MenuButton>()
     private var menuAnimationProgress = 0f
+    private var menuAlpha = 0f
 
     // ── Scoring & Mechanics ─────────────────────────────────────────
     private var score = 0
     private var hiScore = 0
-    private var lives = 3 // NOVO: 3 Vidas
+    private var lives = 3 // Energia (Raios)
     private var currentDistance = 0f
     private var bestDistance = 0f
 
-    // NOVO: Multiplicador de velocidade a cada 5000m
+    // Multiplicador de velocidade a cada 5000m
     private var distanceSpeedMultiplier = 1.0f
     private var nextDistanceThreshold = 5000f
 
@@ -193,7 +193,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 rollOffset = rawRoll; sensorFiltered = 0f; steerInput = 0f; isCalibrating = false
                 return true
             }
-            else -> { if (isInRect(x, y, W-80f, 20f, 60f, 60f)) { openMenu(); return true } }
+            else -> if (isInRect(x, y, W-80f, 120f, 60f, 60f)) { openMenu(); return true }
         }
         return super.onTouchEvent(event)
     }
@@ -229,8 +229,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     fun resetGame() {
         score = 0; currentDistance = 0f; conesDodged = 0; currentStreak = 0; longestStreak = 0
-        lives = 3 // Reinicia as 3 vidas
-        distanceSpeedMultiplier = 1.0f // Reinicia multiplicador de distância
+        lives = 3 // Reinicia a Energia (Raios)
+        distanceSpeedMultiplier = 1.0f
         nextDistanceThreshold = 5000f
 
         cones.clear(); popups.clear(); windLines.clear(); bonusStars.clear()
@@ -261,7 +261,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun updateLogic() {
         val W = width.toFloat(); val H = height.toFloat()
 
-        // ── Steering ─────────────────────────────────────────────────
+        // ── Steering (Estrada Total) ─────────────────────────────────
         val laneLeft  = W * 0.05f
         val laneRight = W * 0.95f - carBitmap.width
         val center    = (laneLeft + laneRight) / 2f
@@ -282,7 +282,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (isAnyNitro) {
             speedMultiplier = 2.5f
             nitroIntensity = (nitroIntensity + 0.07f).coerceAtMost(1f)
-
             if (isBonusNitroActive) {
                 nitroCharge = (nitroCharge + 0.20f).coerceAtMost(100f)
             } else {
@@ -295,7 +294,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             nitroCharge = (nitroCharge + 0.20f).coerceAtMost(100f)
         }
 
-        // ── Atualização de Velocidade (A cada 5000m) ──────────────────
+        // ── Atualização de Velocidade (5000m) ─────────────────────────
         currentDistance += gameSpeed * speedMultiplier * distanceSpeedMultiplier * 0.08f
         if (currentDistance >= nextDistanceThreshold) {
             distanceSpeedMultiplier *= 1.2f
@@ -313,20 +312,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (score > hiScore) hiScore = score
         if (flashFrames > 0) flashFrames--
 
-        // Spawn Cones: Agora nascem mais rápido e ajustam-se à velocidade global
         coneSpawnTimer--
         if (coneSpawnTimer <= 0) {
-            val spawnLeft = W * 0.2f
-            val spawnRight = W * 0.8f - coneBitmap.width
+            val spawnLeft = W * 0.15f
+            val spawnRight = W * 0.85f - coneBitmap.width
             cones.add(Cone(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f))
-
-            // Fórmula que diminui o tempo entre cones conforme ganhas pontos e multiplicadores
             val baseTime = 60 - minOf(score / 50, 45)
             coneSpawnTimer = (baseTime / distanceSpeedMultiplier).toInt().coerceAtLeast(12)
         }
 
-        // Spawn Estrelas (Aprox. a cada 7 segundos)
-        if (rng.nextInt(400) == 0) {
+        if (rng.nextInt(350) == 0) {
             val spawnLeft = W * 0.2f
             val spawnRight = W * 0.8f - starIcon.width
             bonusStars.add(BonusStar(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f))
@@ -346,7 +341,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 if (RectF.intersects(carRect, objRect)) {
                     s.hit = true
                     bonusStars.removeAt(i)
-                    bonusNitroEndTime = System.currentTimeMillis() + 5000L // 5 Segundos de Nitro!
+                    bonusNitroEndTime = System.currentTimeMillis() + 5000L
                     popups.add(Popup("NITRO 5s!", cyan, carX+carBitmap.width/2f, carCY-40f, 60))
                 }
             }
@@ -374,9 +369,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     cones.removeAt(i)
                     currentStreak = 0
 
-                    lives-- // Perde 1 vida ao bater
+                    lives--
                     flashFrames = 12
-                    popups.add(Popup("AI!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
+                    popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
 
                     if (lives <= 0) {
                         isGameOver = true
@@ -396,7 +391,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     private fun updateWindTunnel(W: Float, H: Float) {
         if (nitroIntensity <= 0.02f) { windLines.clear(); return }
-        val ox = W/2f; val oy = H*0.40f
+        val ox = W/2f; val oy = 0f // Ponto de fuga no topo
         val rate = (7f - nitroIntensity*5.5f).toInt().coerceAtLeast(1)
         if (--windSpawnTimer <= rate) {
             windSpawnTimer = rate
@@ -452,9 +447,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun drawRoad(canvas: Canvas, W: Float, H: Float) {
-        val cx = W/2f; val vy = H*0.35f
-        val topW = W * 0.6f
-        val botW = W * 1.0f  // Estrada ocupa base inteira
+        val cx = W/2f; val vy = 0f // Ponto de Fuga no TOP DO ECRÃ
+        val topW = W * 0.15f       // Estreito no topo
+        val botW = W * 1.0f        // Ocupa a base toda
 
         val p = Path().apply { moveTo(cx-topW/2f,vy); lineTo(cx+topW/2f,vy); lineTo(cx+botW/2f,H); lineTo(cx-botW/2f,H); close() }
         paint.style = Paint.Style.FILL
@@ -464,9 +459,10 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         paint.style = Paint.Style.STROKE; paint.strokeWidth = 5f; paint.color = cyan
         canvas.drawLine(cx-topW/2f,vy,cx-botW/2f,H,paint); canvas.drawLine(cx+topW/2f,vy,cx+botW/2f,H,paint)
 
+        // Linhas centrais Neon
         for (i in 0..14) {
             val t = ((i/14f) + roadScroll/H) % 1f; if (t < 0.04f) continue
-            val yy = vy + t*(H-vy); val pr = (yy-vy)/(H-vy)
+            val yy = vy + t*(H-vy); val pr = yy / H // Proporção baseada na altura
             val hw = (topW*0.1f + (botW*0.45f - topW*0.1f)*pr)*0.12f
             paint.strokeWidth = 1f+pr*4.5f; paint.color = Color.argb((80+pr*140).toInt(),255,0,255)
             canvas.drawLine(cx-hw,yy,cx+hw,yy,paint)
@@ -543,26 +539,23 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     // ── HUD ──────────────────────────────────────────────────────────
     private fun drawHUD(canvas: Canvas, W: Float, H: Float) {
-        // Distância no canto esquerdo
         hudBox(canvas, 20f, 20f, 180f, 66f)
         hudLbl(canvas,"DISTÂNCIA",38f,47f,neonGreen)
         hudVal(canvas,"${currentDistance.toInt()} m",38f,76f,22f)
 
-        // Recorde no centro
         hudBox(canvas,W/2f-100f,20f,200f,86f)
         hudLbl(canvas,"RECORDE",W/2f-82f,50f,neonYellow)
         hudVal(canvas, hiScore.toString(),W/2f-82f,84f)
 
-        // Velocidade à direita
         val kmh=(80f * speedMultiplier * distanceSpeedMultiplier + (speedMultiplier-1f)*120f).toInt()
         hudBox(canvas,W-200f,20f,180f,86f)
         hudLbl(canvas,"VELOC.",W-182f,50f,magenta)
         hudVal(canvas,"$kmh km/h",W-182f,84f)
 
-        // Vidas por baixo da distância
+        // Vidas Design Neon (Raios)
         pixelPaint.textSize = 30f
-        pixelPaint.color = neonRed
-        canvas.drawText("VIDAS: ${"♥".repeat(lives)}", 30f, 130f, pixelPaint)
+        pixelPaint.color = neonYellow
+        canvas.drawText("ENERGIA: ${"⚡".repeat(lives)}", 30f, 130f, pixelPaint)
 
         drawNitroBar(canvas, W, H)
 
