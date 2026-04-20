@@ -34,12 +34,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun setupAudio() {
         try {
-            // Música de Fundo (Loop)
             bgMusic = MediaPlayer.create(this, R.raw.musica_fundo)
             bgMusic?.isLooping = true
-            bgMusic?.setVolume(0.5f, 0.5f) // Volume a 50% para não abafar o motor
+            bgMusic?.setVolume(0.4f, 0.4f)
 
-            // Som do Motor (Loop)
             carMusic = MediaPlayer.create(this, R.raw.car_sound)
             carMusic?.isLooping = true
             carMusic?.setVolume(0.8f, 0.8f)
@@ -51,29 +49,38 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> {
-                // SOLUÇÃO DO BUG: Converter Quaternião em Ângulos Reais (Roll)
                 val rotationMatrix = FloatArray(9)
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
                 val orientation = FloatArray(3)
                 SensorManager.getOrientation(rotationMatrix, orientation)
 
-                // orientation[2] é o Roll (inclinação lateral) em radianos. 100% simétrico!
                 val roll = orientation[2]
                 gameView.updateSensor(roll)
+
+                // ── ÁUDIO 3D (STEREO PANNING) ──
+                // Lê a direção do carro atual (de -1 a 1)
+                val steer = gameView.getCurrentSteer()
+
+                // Se steer = -1 (Esquerda total): Esquerdo fica 1.0, Direito fica 0.2
+                // Se steer = 1 (Direita total): Esquerdo fica 0.2, Direito fica 1.0
+                var leftVol = 0.8f - (steer * 0.6f)
+                var rightVol = 0.8f + (steer * 0.6f)
+
+                leftVol = leftVol.coerceIn(0.1f, 1.0f)
+                rightVol = rightVol.coerceIn(0.1f, 1.0f)
+
+                carMusic?.setVolume(leftVol, rightVol)
             }
 
             Sensor.TYPE_PROXIMITY -> {
                 val isNear = event.values[0] < (event.sensor.maximumRange * 0.5f)
                 gameView.setNitro(isNear)
 
-                // Acelera o som do motor quando o Nitro está ativo! (Apenas para Android 6.0+)
                 try {
                     val params = PlaybackParams()
-                    params.speed = if (isNear) 1.5f else 1.0f // 1.5x mais rápido no Nitro
+                    params.speed = if (isNear) 1.5f else 1.0f
                     carMusic?.playbackParams = params
-                } catch (e: Exception) {
-                    // Fallback se o telemóvel for muito antigo
-                }
+                } catch (e: Exception) {}
             }
         }
     }

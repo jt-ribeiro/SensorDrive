@@ -7,7 +7,6 @@ import android.view.MotionEvent
 import android.view.SurfaceView
 import kotlin.math.*
 import kotlin.random.Random
-import android.content.SharedPreferences
 
 class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), Runnable {
 
@@ -25,11 +24,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val pixelPaint = Paint().apply {
         typeface = Typeface.MONOSPACE
-        isAntiAlias = true // Ativado para os emojis (Raios) ficarem suaves
+        isAntiAlias = true
         isFilterBitmap = false
     }
     private val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+    // Tinta especial para pintar os cones roxos "tóxicos"
+    private val purpleConePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        colorFilter = LightingColorFilter(Color.parseColor("#FF00FF"), 0x000000)
+    }
 
     private val flameColors1 = intArrayOf(Color.WHITE, Color.parseColor("#FF44FF"), Color.argb(130, 150, 0, 220), Color.TRANSPARENT)
     private val flameStops1 = floatArrayOf(0f, 0.2f, 0.6f, 1f)
@@ -48,13 +52,14 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     // ── Scoring & Mechanics ─────────────────────────────────────────
     private var score = 0
     private var hiScore = 0
-    private var lives = 3 // Energia (Raios)
+    private var lives = 3
     private var currentDistance = 0f
-    private var bestDistance = 0f
 
-    // Multiplicador de velocidade a cada 5000m
     private var distanceSpeedMultiplier = 1.0f
     private var nextDistanceThreshold = 5000f
+
+    // Timer para o obstáculo de confusão (inversão)
+    private var confusionEndTime = 0L
 
     private val prefs = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
 
@@ -112,6 +117,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val DEADZONE     = 0.03f
     private val MAX_TILT     = 0.40f
 
+    // Getter para a MainActivity ler o panning do áudio
+    fun getCurrentSteer(): Float = steerInput
+
     fun updateSensor(raw: Float) {
         rawRoll = raw
         if (isGameOver || isCalibrating || isPaused) return
@@ -127,7 +135,15 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             sensorFiltered < -DEADZONE -> sensorFiltered + DEADZONE
             else -> 0f
         }
-        steerInput = (afterDz / (MAX_TILT - DEADZONE)).coerceIn(-1f, 1f)
+
+        var finalSteer = (afterDz / (MAX_TILT - DEADZONE)).coerceIn(-1f, 1f)
+
+        // ── INVERSÃO DE CONTROLOS (CONFUSÃO) ──
+        if (System.currentTimeMillis() < confusionEndTime) {
+            finalSteer *= -1f // Troca a esquerda pela direita!
+        }
+
+        steerInput = finalSteer
     }
 
     // ── Game State ───────────────────────────────────────────────────
@@ -143,7 +159,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var currentStreak = 0
     private var longestStreak = 0
 
-    private data class Cone(var x: Float, var y: Float, var hit: Boolean = false, var passed: Boolean = false)
+    // Modificado para suportar o tipo de Cone
+    private data class Cone(var x: Float, var y: Float, val isPurple: Boolean, var hit: Boolean = false, var passed: Boolean = false)
     private val cones = mutableListOf<Cone>()
     private var coneSpawnTimer = 0
 
@@ -193,7 +210,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 rollOffset = rawRoll; sensorFiltered = 0f; steerInput = 0f; isCalibrating = false
                 return true
             }
-            else -> if (isInRect(x, y, W-80f, 120f, 60f, 60f)) { openMenu(); return true }
+            else -> { if (isInRect(x, y, W-80f, 120f, 60f, 60f)) { openMenu(); return true } }
         }
         return super.onTouchEvent(event)
     }
@@ -229,12 +246,13 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     fun resetGame() {
         score = 0; currentDistance = 0f; conesDodged = 0; currentStreak = 0; longestStreak = 0
-        lives = 3 // Reinicia a Energia (Raios)
+        lives = 3
         distanceSpeedMultiplier = 1.0f
         nextDistanceThreshold = 5000f
 
         cones.clear(); popups.clear(); windLines.clear(); bonusStars.clear()
-        nitroCharge = 100f; isManualNitro = false; bonusNitroEndTime = 0L; speedMultiplier = 1f
+        nitroCharge = 100f; isManualNitro = false; bonusNitroEndTime = 0L; confusionEndTime = 0L
+        speedMultiplier = 1f
         gameSpeed = 7f; roadScroll = 0f; coneSpawnTimer = 0; flashFrames = 0
         sensorFiltered = 0f; steerInput = 0f; carLean = 0f; carScaleX = 1f; carVelX = 0f; prevCarX = 0f
         nitroIntensity = 0f; windSpawnTimer = 0
@@ -261,7 +279,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun updateLogic() {
         val W = width.toFloat(); val H = height.toFloat()
 
-        // ── Steering (Estrada Total) ─────────────────────────────────
         val laneLeft  = W * 0.05f
         val laneRight = W * 0.95f - carBitmap.width
         val center    = (laneLeft + laneRight) / 2f
@@ -275,7 +292,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         carLean   += (targetLean  - carLean)   * 0.13f
         carScaleX += (targetScale - carScaleX) * 0.18f
 
-        // ── Lógica Combinada do Nitro ────────────────────────────────
         val isBonusNitroActive = System.currentTimeMillis() < bonusNitroEndTime
         val isAnyNitro = isManualNitro || isBonusNitroActive
 
@@ -294,7 +310,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             nitroCharge = (nitroCharge + 0.20f).coerceAtMost(100f)
         }
 
-        // ── Atualização de Velocidade (5000m) ─────────────────────────
         currentDistance += gameSpeed * speedMultiplier * distanceSpeedMultiplier * 0.08f
         if (currentDistance >= nextDistanceThreshold) {
             distanceSpeedMultiplier *= 1.2f
@@ -306,7 +321,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (roadScroll > H) roadScroll -= H
         updateWindTunnel(W, H)
 
-        // ── Score & Spawning ─────────────────────────────────────────
         score = (score + speedMultiplier).toInt()
         gameSpeed = 7f + minOf(score / 500f, 9f)
         if (score > hiScore) hiScore = score
@@ -316,7 +330,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (coneSpawnTimer <= 0) {
             val spawnLeft = W * 0.15f
             val spawnRight = W * 0.85f - coneBitmap.width
-            cones.add(Cone(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f))
+            // 15% de chance de ser um cone tóxico
+            val isPurple = rng.nextInt(100) < 15
+            cones.add(Cone(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f, isPurple))
             val baseTime = 60 - minOf(score / 50, 45)
             coneSpawnTimer = (baseTime / distanceSpeedMultiplier).toInt().coerceAtLeast(12)
         }
@@ -330,7 +346,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val carCY = H * 0.8f
         carRect.set(carX+12f, carCY+18f, carX+carBitmap.width-12f, carCY+carBitmap.height-10f)
 
-        // ── Update Estrelas ──────────────────────────────────────────
         for (i in bonusStars.indices.reversed()) {
             val s = bonusStars[i]
             s.y += (gameSpeed + 4f) * speedMultiplier * distanceSpeedMultiplier
@@ -347,7 +362,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             }
         }
 
-        // ── Update Cones (Colisão com Vidas) ─────────────────────────
         for (i in cones.indices.reversed()) {
             val c = cones[i]
             c.y += (gameSpeed + 4f) * speedMultiplier * distanceSpeedMultiplier
@@ -369,14 +383,21 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     cones.removeAt(i)
                     currentStreak = 0
 
-                    lives--
-                    flashFrames = 12
-                    popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
+                    if (c.isPurple) {
+                        // Bateu no cone roxo: Sensores invertidos!
+                        confusionEndTime = System.currentTimeMillis() + 3000L
+                        popups.add(Popup("CUIDADO!", magenta, carX+carBitmap.width/2f, carCY-20f, 50))
+                    } else {
+                        // Bateu no cone normal: Perde vida
+                        lives--
+                        flashFrames = 12
+                        popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
 
-                    if (lives <= 0) {
-                        isGameOver = true
-                        saveHiScore()
-                        return
+                        if (lives <= 0) {
+                            isGameOver = true
+                            saveHiScore()
+                            return
+                        }
                     }
                 }
             }
@@ -391,7 +412,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     private fun updateWindTunnel(W: Float, H: Float) {
         if (nitroIntensity <= 0.02f) { windLines.clear(); return }
-        val ox = W/2f; val oy = 0f // Ponto de fuga no topo
+        val ox = W/2f; val oy = 0f
         val rate = (7f - nitroIntensity*5.5f).toInt().coerceAtLeast(1)
         if (--windSpawnTimer <= rate) {
             windSpawnTimer = rate
@@ -436,7 +457,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         when {
             isGameOver    -> { drawPlayfield(canvas, W, H) }
-            isCalibrating -> { /* Esconde jogo durante calibração */ }
+            isCalibrating -> { }
             else          -> { drawPlayfield(canvas, W, H) }
         }
 
@@ -447,9 +468,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun drawRoad(canvas: Canvas, W: Float, H: Float) {
-        val cx = W/2f; val vy = 0f // Ponto de Fuga no TOP DO ECRÃ
-        val topW = W * 0.15f       // Estreito no topo
-        val botW = W * 1.0f        // Ocupa a base toda
+        val cx = W/2f; val vy = 0f
+        val topW = W * 0.15f
+        val botW = W * 1.0f
 
         val p = Path().apply { moveTo(cx-topW/2f,vy); lineTo(cx+topW/2f,vy); lineTo(cx+botW/2f,H); lineTo(cx-botW/2f,H); close() }
         paint.style = Paint.Style.FILL
@@ -459,10 +480,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         paint.style = Paint.Style.STROKE; paint.strokeWidth = 5f; paint.color = cyan
         canvas.drawLine(cx-topW/2f,vy,cx-botW/2f,H,paint); canvas.drawLine(cx+topW/2f,vy,cx+botW/2f,H,paint)
 
-        // Linhas centrais Neon
         for (i in 0..14) {
             val t = ((i/14f) + roadScroll/H) % 1f; if (t < 0.04f) continue
-            val yy = vy + t*(H-vy); val pr = yy / H // Proporção baseada na altura
+            val yy = vy + t*(H-vy); val pr = yy / H
             val hw = (topW*0.1f + (botW*0.45f - topW*0.1f)*pr)*0.12f
             paint.strokeWidth = 1f+pr*4.5f; paint.color = Color.argb((80+pr*140).toInt(),255,0,255)
             canvas.drawLine(cx-hw,yy,cx+hw,yy,paint)
@@ -480,7 +500,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (nitroIntensity > 0.01f) drawWindTunnelFx(canvas, W, H)
 
         for (i in bonusStars.indices) canvas.drawBitmap(starIcon, bonusStars[i].x, bonusStars[i].y, pixelPaint)
-        for (i in cones.indices) canvas.drawBitmap(coneBitmap, cones[i].x, cones[i].y, pixelPaint)
+
+        for (i in cones.indices) {
+            val c = cones[i]
+            // Se for cone roxo, usa o paint modificado
+            if (c.isPurple) {
+                canvas.drawBitmap(coneBitmap, c.x, c.y, purpleConePaint)
+            } else {
+                canvas.drawBitmap(coneBitmap, c.x, c.y, pixelPaint)
+            }
+        }
 
         val carCY = H * 0.8f
         val cx = carX+carBitmap.width/2f; val cy = carCY+carBitmap.height/2f
@@ -552,21 +581,28 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         hudLbl(canvas,"VELOC.",W-182f,50f,magenta)
         hudVal(canvas,"$kmh km/h",W-182f,84f)
 
-        // Vidas Design Neon (Raios)
         pixelPaint.textSize = 30f
         pixelPaint.color = neonYellow
         canvas.drawText("ENERGIA: ${"⚡".repeat(lives)}", 30f, 130f, pixelPaint)
 
         drawNitroBar(canvas, W, H)
 
-        val timeLeft = bonusNitroEndTime - System.currentTimeMillis()
-        if (timeLeft > 0) {
-            pixelPaint.textAlign = Paint.Align.CENTER
-            pixelPaint.textSize = 34f
+        // Textos Dinâmicos Centro-Ecrã
+        pixelPaint.textAlign = Paint.Align.CENTER
+        pixelPaint.textSize = 34f
+
+        val nitroTimeLeft = bonusNitroEndTime - System.currentTimeMillis()
+        if (nitroTimeLeft > 0) {
             pixelPaint.color = cyan
-            canvas.drawText("NITRO MÁX: ${timeLeft/1000}s", W/2f, H*0.25f, pixelPaint)
-            pixelPaint.textAlign = Paint.Align.LEFT
+            canvas.drawText("NITRO MÁX: ${nitroTimeLeft/1000}s", W/2f, H*0.25f, pixelPaint)
         }
+
+        val confusionTimeLeft = confusionEndTime - System.currentTimeMillis()
+        if (confusionTimeLeft > 0) {
+            pixelPaint.color = magenta
+            canvas.drawText("⚠️ INVERTIDO: ${confusionTimeLeft/1000}s ⚠️", W/2f, H*0.32f, pixelPaint)
+        }
+        pixelPaint.textAlign = Paint.Align.LEFT
     }
 
     private fun hudBox(canvas: Canvas, x: Float, y: Float, w: Float, h: Float) {
