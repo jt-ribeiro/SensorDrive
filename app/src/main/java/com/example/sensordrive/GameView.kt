@@ -3,9 +3,11 @@ package com.example.sensordrive
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.SurfaceView
 import kotlin.math.*
 import kotlin.random.Random
+import android.content.SharedPreferences
 
 class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), Runnable {
 
@@ -14,6 +16,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var isPlaying = false
     var isCalibrating = true
     var isGameOver = false
+    private var isPaused = false
+    private var showMenu = false
 
     // ── Paint ───────────────────────────────────────────────────────
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -22,6 +26,29 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         isAntiAlias = false
         isFilterBitmap = false
     }
+
+    // ── Menu System ─────────────────────────────────────────────────
+    private data class MenuButton(
+        val text: String,
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        val color: Int,
+        val action: () -> Unit
+    )
+    private val menuButtons = mutableListOf<MenuButton>()
+    private var menuAnimationProgress = 0f
+    private var menuTargetProgress = 0f
+
+    // ── Scoring System ──────────────────────────────────────────────
+    private data class ScoreEntry(val score: Int, val distance: Float, val date: String)
+    private val scores = mutableListOf<ScoreEntry>()
+    private var currentDistance = 0f // em metros
+    private var totalDistance = 0f
+    private var bestDistance = 0f
+    private var sessionBestScore = 0
+    private val prefs: SharedPreferences = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
 
     // ── Assets ──────────────────────────────────────────────────────
     private fun loadBitmap(resId: Int, targetW: Int): Bitmap {
@@ -40,6 +67,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val nitroIcon  by lazy { loadBitmap(R.drawable.nitro,           80) }
     private val starIcon   by lazy { loadBitmap(R.drawable.estrela,         44) }
     private val flagIcon   by lazy { loadBitmap(R.drawable.bandeira,        80) }
+    private val menuIcon   by lazy { loadBitmap(R.drawable.menu,            60) } // Adicionar ícone de menu
+    private val trophyIcon by lazy { loadBitmap(R.drawable.trofeu,        50) } // Adicionar ícone de troféu
 
     // ── Game State ──────────────────────────────────────────────────
     private var carX = 0f
@@ -72,11 +101,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val popups = mutableListOf<Popup>()
 
     // ── Car turn animation ───────────────────────────────────────────
-    // carLean: ângulo visual suavizado (graus). Positivo = inclinação à direita
     private var carLean = 0f
-    // carScaleX: esticamento lateral do sprite ao virar (perspetiva fake)
     private var carScaleX = 1f
-    // velocidade instantânea X do carro em pixels/frame
     private var carVelX = 0f
     private var prevCarX = 0f
 
@@ -84,7 +110,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private data class WindLine(
         var x: Float,
         var y: Float,
-        val angle: Float,       // ângulo em radianos
+        val angle: Float,
         var speed: Float,
         val length: Float,
         val color: Int,
@@ -94,7 +120,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     )
     private val windLines = mutableListOf<WindLine>()
     private var windSpawnTimer = 0
-    // Intensidade do efeito: sobe ao ativar nitro, desce ao parar
     private var nitroIntensity = 0f
 
     // ── Neon palette ─────────────────────────────────────────────────
@@ -103,39 +128,251 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val neonYellow = Color.parseColor("#FFEE00")
     private val neonRed    = Color.parseColor("#FF3333")
     private val darkBg     = Color.parseColor("#07001A")
+    private val menuBg     = Color.parseColor("#0A0020")
+    private val buttonBg   = Color.parseColor("#1A0033")
 
-    // ────────────────────────────────────────────────────────────────
-    // Sensor (low-pass filtered)
-    // ────────────────────────────────────────────────────────────────
+    // ── Touch handling ──────────────────────────────────────────────
+    init {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        loadScores()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            val x = event.x
+            val y = event.y
+
+            when {
+                showMenu -> {
+                    handleMenuTouch(x, y)
+                    return true
+                }
+                isGameOver -> {
+                    // Verifica se tocou no botão de menu no game over
+                    if (isTouchInMenuButton(x, y)) {
+                        openMenu()
+                        return true
+                    }
+                    resetGame()
+                    return true
+                }
+                isCalibrating -> {
+                    isCalibrating = false
+                    return true
+                }
+                else -> {
+                    // Verifica toque no botão de menu durante o jogo
+                    if (isTouchInMenuButton(x, y)) {
+                        openMenu()
+                        return true
+                    }
+                }
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun isTouchInMenuButton(x: Float, y: Float): Boolean {
+        val W = width.toFloat()
+        return x >= W - 80f && x <= W - 20f && y >= 20f && y <= 80f
+    }
+
+    private fun handleMenuTouch(x: Float, y: Float) {
+        for (button in menuButtons) {
+            if (x >= button.x && x <= button.x + button.width &&
+                y >= button.y && y <= button.y + button.height) {
+                button.action()
+                return
+            }
+        }
+    }
+
+    private fun openMenu() {
+        isPaused = true
+        showMenu = true
+        menuTargetProgress = 1f
+        setupMenuButtons()
+    }
+
+    private fun closeMenu() {
+        menuTargetProgress = 0f
+        showMenu = false
+        isPaused = false
+    }
+
+    private fun setupMenuButtons() {
+        menuButtons.clear()
+        val W = width.toFloat()
+        val H = height.toFloat()
+        val btnW = 280f
+        val btnH = 70f
+        val startY = H / 2f - 100f
+        val spacing = 90f
+
+        // Botão Continuar
+        menuButtons.add(MenuButton(
+            "CONTINUAR",
+            W / 2f - btnW / 2f,
+            startY,
+            btnW, btnH,
+            cyan
+        ) {
+            closeMenu()
+        })
+
+        // Botão Restart
+        menuButtons.add(MenuButton(
+            "REINICIAR",
+            W / 2f - btnW / 2f,
+            startY + spacing,
+            btnW, btnH,
+            neonYellow
+        ) {
+            closeMenu()
+            resetGame()
+            isCalibrating = false
+        })
+
+        // Botão Ver Pontuações
+        menuButtons.add(MenuButton(
+            "PONTUAÇÕES",
+            W / 2f - btnW / 2f,
+            startY + spacing * 2,
+            btnW, btnH,
+            magenta
+        ) {
+            // Mostra tela de pontuações
+            showScoresScreen()
+        })
+
+        // Botão Sair
+        menuButtons.add(MenuButton(
+            "SAIR",
+            W / 2f - btnW / 2f,
+            startY + spacing * 3,
+            btnW, btnH,
+            neonRed
+        ) {
+            // Callback para a Activity fechar
+            (context as? android.app.Activity)?.finish()
+        })
+    }
+
+    private fun showScoresScreen() {
+        // Implementação da tela de pontuações
+        menuButtons.clear()
+        val W = width.toFloat()
+        val H = height.toFloat()
+
+        menuButtons.add(MenuButton(
+            "VOLTAR",
+            W / 2f - 140f,
+            H - 120f,
+            280f, 60f,
+            cyan
+        ) {
+            setupMenuButtons()
+        })
+    }
+
+    // ── Sensor (low-pass filtered) ──────────────────────────────────
     fun updateRotation(z: Float) {
-        if (isGameOver || isCalibrating) return
+        if (isGameOver || isCalibrating || isPaused) return
         val alpha = 0.08f
         rotationZ = rotationZ + alpha * (z - rotationZ)
     }
 
     fun setNitro(active: Boolean) {
+        if (isPaused) return
         isNitroActive = active && nitroCharge > 5f
         speedMultiplier = if (isNitroActive) 2.4f else 1.0f + minOf(score / 300f, 0.8f)
     }
 
     fun resetGame() {
-        score = 0; cones.clear(); popups.clear(); windLines.clear()
-        nitroCharge = 100f; isNitroActive = false; speedMultiplier = 1.0f
-        gameSpeed = 7f; roadScroll = 0f; coneSpawnTimer = 0; flashFrames = 0
-        rotationZ = 0f; carLean = 0f; carScaleX = 1f; carVelX = 0f; prevCarX = 0f
-        nitroIntensity = 0f; windSpawnTimer = 0
-        isGameOver = false; isCalibrating = true
+        score = 0
+        currentDistance = 0f
+        cones.clear()
+        popups.clear()
+        windLines.clear()
+        nitroCharge = 100f
+        isNitroActive = false
+        speedMultiplier = 1.0f
+        gameSpeed = 7f
+        roadScroll = 0f
+        coneSpawnTimer = 0
+        flashFrames = 0
+        rotationZ = 0f
+        carLean = 0f
+        carScaleX = 1f
+        carVelX = 0f
+        prevCarX = 0f
+        nitroIntensity = 0f
+        windSpawnTimer = 0
+        isGameOver = false
+        isCalibrating = true
+        isPaused = false
+        showMenu = false
+        menuAnimationProgress = 0f
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Thread loop
-    // ────────────────────────────────────────────────────────────────
+    // ── Scoring System ──────────────────────────────────────────────
+    private fun loadScores() {
+        hiScore = prefs.getInt("hiScore", 0)
+        bestDistance = prefs.getFloat("bestDistance", 0f)
+        val scoresJson = prefs.getString("scores", "") ?: ""
+        if (scoresJson.isNotEmpty()) {
+            scoresJson.split(";").forEach { entry ->
+                val parts = entry.split(",")
+                if (parts.size >= 3) {
+                    scores.add(ScoreEntry(
+                        parts[0].toIntOrNull() ?: 0,
+                        parts[1].toFloatOrNull() ?: 0f,
+                        parts[2]
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun saveScores() {
+        prefs.edit().apply {
+            putInt("hiScore", hiScore)
+            putFloat("bestDistance", bestDistance)
+            val sb = StringBuilder()
+            scores.takeLast(10).forEach { entry ->
+                if (sb.isNotEmpty()) sb.append(";")
+                sb.append("${entry.score},${entry.distance},${entry.date}")
+            }
+            putString("scores", sb.toString())
+            apply()
+        }
+    }
+
+    private fun addScore() {
+        val date = java.text.SimpleDateFormat("dd/MM/yy HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        scores.add(ScoreEntry(score, currentDistance, date))
+        scores.sortByDescending { it.score }
+        if (scores.size > 10) scores.subList(10, scores.size).clear()
+
+        if (score > hiScore) {
+            hiScore = score
+            sessionBestScore = score
+        }
+        if (currentDistance > bestDistance) bestDistance = currentDistance
+
+        saveScores()
+    }
+
+    // ── Thread loop ───────────────────────────────────────────────────
     override fun run() {
         while (isPlaying) {
             if (!holder.surface.isValid) { Thread.sleep(8); continue }
             val canvas = holder.lockCanvas() ?: continue
             try {
-                if (!isCalibrating && !isGameOver) updateLogic()
+                if (!isCalibrating && !isGameOver && !isPaused) updateLogic()
+                updateMenuAnimation()
                 drawFrame(canvas)
             } finally {
                 holder.unlockCanvasAndPost(canvas)
@@ -144,9 +381,15 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Logic
-    // ────────────────────────────────────────────────────────────────
+    private fun updateMenuAnimation() {
+        if (menuAnimationProgress < menuTargetProgress) {
+            menuAnimationProgress = (menuAnimationProgress + 0.15f).coerceAtMost(1f)
+        } else if (menuAnimationProgress > menuTargetProgress) {
+            menuAnimationProgress = (menuAnimationProgress - 0.15f).coerceAtLeast(0f)
+        }
+    }
+
+    // ── Logic ───────────────────────────────────────────────────────
     private fun updateLogic() {
         val W = width.toFloat()
         val H = height.toFloat()
@@ -169,11 +412,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         carVelX = carX - prevCarX
         prevCarX = carX
 
-        // Lean: velocidade X → ângulo visual (máx ±14°), suavizado
         val targetLean = (carVelX * 2.8f).coerceIn(-14f, 14f)
         carLean += (targetLean - carLean) * 0.12f
 
-        // ScaleX: esticamento lateral — lado exterior parece maior
         val targetScaleX = 1f + abs(carVelX) * 0.015f
         carScaleX += (targetScaleX - carScaleX) * 0.16f
 
@@ -194,8 +435,11 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         // ── Wind tunnel update ────────────────────────────────────────
         updateWindTunnel(W, H)
 
-        // ── Score & speed ramp ────────────────────────────────────────
+        // ── Score & Distance & speed ramp ─────────────────────────────
         score++
+        currentDistance += (gameSpeed * speedMultiplier) * 0.1f // metros
+        totalDistance += (gameSpeed * speedMultiplier) * 0.1f
+
         gameSpeed = 7f + minOf(score / 400f, 8f)
         if (score > hiScore) hiScore = score
         if (flashFrames > 0) flashFrames--
@@ -221,7 +465,11 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 val cRect = RectF(c.x + 8f, c.y + 8f, c.x + coneBitmap.width - 8f, c.y + coneBitmap.height - 8f)
                 if (RectF.intersects(carRect, cRect)) {
                     c.hit = true; iter.remove()
-                    if (score < 60) { isGameOver = true; return }
+                    if (score < 60) {
+                        isGameOver = true
+                        addScore()
+                        return
+                    }
                     score -= 60; flashFrames = 10
                     popups.add(Popup("-60", neonRed, carX + carBitmap.width / 2f, H - 380f, 40))
                 }
@@ -232,17 +480,13 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         popups.forEach { it.y -= 2f; it.life-- }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Wind tunnel logic
-    // ────────────────────────────────────────────────────────────────
+    // ── Wind tunnel logic ────────────────────────────────────────────
     private fun updateWindTunnel(W: Float, H: Float) {
         if (nitroIntensity <= 0.02f) { windLines.clear(); return }
 
-        // Ponto de origem: ponto de fuga da estrada (perspetiva)
         val originX = W / 2f
         val originY = H * 0.40f
 
-        // Taxa de spawn baseada na intensidade
         windSpawnTimer--
         val rate = (7f - nitroIntensity * 5.5f).toInt().coerceAtLeast(1)
         if (windSpawnTimer <= rate) {
@@ -251,19 +495,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             repeat(burst) { spawnWindLine(originX, originY) }
         }
 
-        // Move e envelhece linhas
         val wIter = windLines.iterator()
         while (wIter.hasNext()) {
             val wl = wIter.next()
             wl.life--
             if (wl.life <= 0) { wIter.remove(); continue }
 
-            // Acelera conforme afasta do centro (perspetiva)
             wl.speed = (wl.speed * 1.055f).coerceAtMost(60f)
             wl.x += cos(wl.angle) * wl.speed
             wl.y += sin(wl.angle) * wl.speed
 
-            // Alpha: fade-in rápido, fade-out no fim
             val lifeRatio = wl.life.toFloat() / wl.maxLife
             wl.alpha = when {
                 lifeRatio > 0.8f  -> ((1f - lifeRatio) / 0.2f * 210f * nitroIntensity).toInt()
@@ -274,14 +515,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun spawnWindLine(originX: Float, originY: Float) {
-        // Ângulos biased para o plano horizontal: as linhas abrem para os lados
-        // como raios de uma explosão radial vista em perspetiva
         val raw = rng.nextFloat() * 2f * PI.toFloat()
-
-        // Comprime verticalmente os ângulos: transforma um círculo numa elipse horizontal
-        // para simular a perspetiva do túnel
         val bx = cos(raw)
-        val by = sin(raw) * 0.45f          // eixo Y comprimido a 45%
+        val by = sin(raw) * 0.45f
         val biased = atan2(by, bx)
 
         val isCyan = rng.nextBoolean()
@@ -299,9 +535,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         ))
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Draw
-    // ────────────────────────────────────────────────────────────────
+    // ── Draw ────────────────────────────────────────────────────────
     private fun drawFrame(canvas: Canvas) {
         val W = width.toFloat()
         val H = height.toFloat()
@@ -311,10 +545,112 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         drawRoad(canvas, W, H)
 
         when {
-            isGameOver    -> { drawPlayfield(canvas, W, H); drawGameOver(canvas, W, H) }
+            isGameOver    -> {
+                drawPlayfield(canvas, W, H);
+                drawGameOver(canvas, W, H)
+            }
             isCalibrating -> drawCalibrate(canvas, W, H)
-            else          -> { drawPlayfield(canvas, W, H); drawHUD(canvas, W, H) }
+            else          -> {
+                drawPlayfield(canvas, W, H);
+                drawHUD(canvas, W, H);
+                drawMenuButton(canvas, W, H)
+            }
         }
+
+        if (showMenu || menuAnimationProgress > 0.01f) {
+            drawMenuOverlay(canvas, W, H)
+        }
+    }
+
+    // ── Menu Button (in-game) ───────────────────────────────────────
+    private fun drawMenuButton(canvas: Canvas, W: Float, H: Float) {
+        val btnX = W - 80f
+        val btnY = 20f
+        val btnSize = 60f
+
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(180, 0, 0, 20)
+        canvas.drawRect(btnX, btnY, btnX + btnSize, btnY + btnSize, paint)
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f
+        paint.color = cyan
+        canvas.drawRect(btnX, btnY, btnX + btnSize, btnY + btnSize, paint)
+
+        // Ícone de menu (3 linhas)
+        paint.style = Paint.Style.FILL
+        paint.color = cyan
+        val lineW = 30f
+        val lineH = 4f
+        val startX = btnX + (btnSize - lineW) / 2f
+        val startY = btnY + 18f
+        val gap = 10f
+
+        for (i in 0..2) {
+            canvas.drawRect(startX, startY + i * gap, startX + lineW, startY + i * gap + lineH, paint)
+        }
+
+        paint.style = Paint.Style.FILL
+    }
+
+    // ── Menu Overlay ────────────────────────────────────────────────
+    private fun drawMenuOverlay(canvas: Canvas, W: Float, H: Float) {
+        val alpha = (menuAnimationProgress * 220).toInt()
+
+        // Fundo escuro semi-transparente
+        paint.color = Color.argb(alpha, 0, 0, 10)
+        canvas.drawRect(0f, 0f, W, H, paint)
+
+        if (menuAnimationProgress < 0.3f) return
+
+        val contentAlpha = ((menuAnimationProgress - 0.3f) / 0.7f).coerceIn(0f, 1f)
+
+        // Título do menu
+        pixelPaint.textAlign = Paint.Align.CENTER
+        pixelPaint.textSize = 48f
+        pixelPaint.color = Color.argb((contentAlpha * 255).toInt(), 0, 255, 255)
+        canvas.drawText("MENU", W / 2f, H / 2f - 200f, pixelPaint)
+
+        // Botões
+        for (button in menuButtons) {
+            drawMenuButton(canvas, button, contentAlpha)
+        }
+
+        pixelPaint.textAlign = Paint.Align.LEFT
+    }
+
+    private fun drawMenuButton(canvas: Canvas, button: MenuButton, alpha: Float) {
+        val a = (alpha * 255).toInt()
+
+        // Sombra/glow
+        paint.maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.SOLID)
+        paint.color = Color.argb((alpha * 60).toInt(), Color.red(button.color), Color.green(button.color), Color.blue(button.color))
+        paint.style = Paint.Style.FILL
+        canvas.drawRect(button.x - 4f, button.y - 4f, button.x + button.width + 4f, button.y + button.height + 4f, paint)
+        paint.maskFilter = null
+
+        // Fundo do botão
+        paint.color = Color.argb((alpha * 220).toInt(), 26, 0, 51)
+        canvas.drawRect(button.x, button.y, button.x + button.width, button.y + button.height, paint)
+
+        // Borda neon
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = Color.argb(a, Color.red(button.color), Color.green(button.color), Color.blue(button.color))
+        canvas.drawRect(button.x, button.y, button.x + button.width, button.y + button.height, paint)
+
+        // Texto
+        pixelPaint.textAlign = Paint.Align.CENTER
+        pixelPaint.textSize = 24f
+        pixelPaint.color = Color.argb(a, 255, 255, 255)
+        canvas.drawText(
+            button.text,
+            button.x + button.width / 2f,
+            button.y + button.height / 2f + 10f,
+            pixelPaint
+        )
+
+        paint.style = Paint.Style.FILL
     }
 
     // ── Starfield ────────────────────────────────────────────────────
@@ -384,7 +720,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             canvas.drawRect(0f, 0f, W, H, paint)
         }
 
-        // Wind tunnel (desenhado antes do carro para ficar por baixo)
+        // Wind tunnel
         if (nitroIntensity > 0.01f) drawWindTunnel(canvas, W, H)
 
         // Cones
@@ -394,22 +730,16 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val carCX = carX + carBitmap.width / 2f
         val carCY = H - 350f + carBitmap.height / 2f
 
-        // Tyre tracks atrás do carro (desenhados antes do save do canvas do carro)
         drawTyreTracks(canvas, carCX, carCY)
 
         canvas.save()
         canvas.translate(carCX, carCY)
-
-        // 1. Lean: rotação do corpo proporcional à velocidade lateral
         canvas.rotate(carLean)
-
-        // 2. Squash & stretch: o lado exterior parece mais largo ao virar
         canvas.scale(carScaleX, 1f)
 
         // Nitro exhaust flame
         if (isNitroActive) {
             val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-            // Chama principal estática
             flamePaint.shader = LinearGradient(
                 0f, carBitmap.height / 2f - 4f,
                 0f, carBitmap.height / 2f + 80f,
@@ -421,7 +751,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             canvas.drawRect(-flameW / 2f, carBitmap.height / 2f - 4f,
                 flameW / 2f, carBitmap.height / 2f + 80f, flamePaint)
 
-            // Chama secundária com flickering baseado no tempo
             val flicker = abs(sin(System.currentTimeMillis() / 55.0)).toFloat()
             flamePaint.shader = LinearGradient(
                 0f, carBitmap.height / 2f,
@@ -480,11 +809,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         for (wl in windLines) {
             if (wl.alpha < 5) continue
 
-            // Cauda da linha: ponto de onde veio
             val tailX = wl.x - cos(wl.angle) * wl.length
             val tailY = wl.y - sin(wl.angle) * wl.length
 
-            // Gradiente: transparente na cauda, cor sólida na ponta
             linePaint.shader = LinearGradient(
                 tailX, tailY, wl.x, wl.y,
                 Color.TRANSPARENT,
@@ -495,22 +822,18 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             canvas.drawLine(tailX, tailY, wl.x, wl.y, linePaint)
         }
 
-        // Vignette neon nas bordas: intensifica a sensação de velocidade
         if (nitroIntensity > 0.25f) {
             val vigAlpha = ((nitroIntensity - 0.25f) / 0.75f * 130f).toInt()
 
             paint.style = Paint.Style.FILL
-            // Borda esquerda: cyan
             paint.shader = LinearGradient(0f, H / 2f, W * 0.2f, H / 2f,
                 Color.argb(vigAlpha, 0, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
             canvas.drawRect(0f, 0f, W * 0.2f, H, paint)
-            // Borda direita: magenta
             paint.shader = LinearGradient(W, H / 2f, W * 0.8f, H / 2f,
                 Color.argb(vigAlpha, 255, 68, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
             canvas.drawRect(W * 0.8f, 0f, W, H, paint)
             paint.shader = null
 
-            // Aberração cromática nas bordas quando intensidade máxima
             if (nitroIntensity > 0.65f) {
                 val aberAlpha = ((nitroIntensity - 0.65f) / 0.35f * 40f).toInt()
                 paint.color = Color.argb(aberAlpha, 255, 68, 255)
@@ -523,24 +846,35 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     // ── HUD ──────────────────────────────────────────────────────────
     private fun drawHUD(canvas: Canvas, W: Float, H: Float) {
+        // Caixa de pontos (esquerda)
         drawHudBox(canvas, 20f, 20f, 200f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = cyan
         canvas.drawText("PONTOS", 40f, 52f, pixelPaint)
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$score", 40f, 88f, pixelPaint)
 
+        // Caixa de recorde (centro)
         drawHudBox(canvas, W / 2f - 110f, 20f, 220f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = neonYellow
         canvas.drawText("RECORDE", W / 2f - 90f, 52f, pixelPaint)
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$hiScore", W / 2f - 90f, 88f, pixelPaint)
 
+        // Caixa de velocidade (direita)
         val kmh = (80f * speedMultiplier + (speedMultiplier - 1f) * 120f).toInt()
         drawHudBox(canvas, W - 220f, 20f, 200f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = magenta
         canvas.drawText("VELOC.", W - 200f, 52f, pixelPaint)
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$kmh km/h", W - 200f, 88f, pixelPaint)
+
+        // Distância (abaixo dos pontos)
+        drawHudBox(canvas, 20f, 120f, 200f, 70f)
+        pixelPaint.textSize = 16f; pixelPaint.color = Color.parseColor("#00FF88")
+        canvas.drawText("DISTÂNCIA", 40f, 148f, pixelPaint)
+        pixelPaint.textSize = 24f; pixelPaint.color = Color.WHITE
+        val distStr = String.format("%.1f m", currentDistance)
+        canvas.drawText(distStr, 40f, 178f, pixelPaint)
 
         drawNitroBar(canvas, W, H)
     }
@@ -574,7 +908,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             paint.shader = null
         }
 
-        // Glow pulsante quando nitro ativo
         if (isNitroActive) {
             val glowAlpha = (160f + sin(System.currentTimeMillis() / 80.0).toFloat() * 60f).toInt()
             paint.style = Paint.Style.STROKE; paint.strokeWidth = 4f
@@ -622,22 +955,58 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val pulse = (sin(System.currentTimeMillis() / 300.0) * 0.3f + 0.7f).toFloat()
         pixelPaint.textSize = 64f
         pixelPaint.color = Color.argb((255 * pulse).toInt(), 255, 40, 40)
-        canvas.drawText("GAME OVER", W / 2f, H / 2f - 120f, pixelPaint)
+        canvas.drawText("GAME OVER", W / 2f, H / 2f - 180f, pixelPaint)
 
-        pixelPaint.textSize = 32f; pixelPaint.color = Color.WHITE
-        canvas.drawText("PONTUAÇÃO FINAL", W / 2f, H / 2f - 40f, pixelPaint)
+        // Pontuação final
+        pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
+        canvas.drawText("PONTUAÇÃO FINAL", W / 2f, H / 2f - 100f, pixelPaint)
         pixelPaint.textSize = 52f; pixelPaint.color = cyan
-        canvas.drawText("$score", W / 2f, H / 2f + 30f, pixelPaint)
+        canvas.drawText("$score", W / 2f, H / 2f - 30f, pixelPaint)
 
-        canvas.drawBitmap(starIcon, W / 2f - starIcon.width / 2f, H / 2f + 60f, pixelPaint)
+        // Distância
+        pixelPaint.textSize = 22f; pixelPaint.color = Color.parseColor("#00FF88")
+        val distStr = String.format("Distância: %.1f m", currentDistance)
+        canvas.drawText(distStr, W / 2f, H / 2f + 20f, pixelPaint)
+
+        // Recorde
+        canvas.drawBitmap(starIcon, W / 2f - starIcon.width / 2f, H / 2f + 50f, pixelPaint)
         pixelPaint.textSize = 22f; pixelPaint.color = neonYellow
-        canvas.drawText("RECORDE: $hiScore", W / 2f, H / 2f + 130f, pixelPaint)
+        canvas.drawText("RECORDE: $hiScore", W / 2f, H / 2f + 120f, pixelPaint)
+
+        // Botão Menu
+        val menuBtnX = W / 2f - 100f
+        val menuBtnY = H / 2f + 160f
+        val menuBtnW = 200f
+        val menuBtnH = 50f
+
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(200, 0, 20, 40)
+        canvas.drawRect(menuBtnX, menuBtnY, menuBtnX + menuBtnW, menuBtnY + menuBtnH, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f
+        paint.color = cyan
+        canvas.drawRect(menuBtnX, menuBtnY, menuBtnX + menuBtnW, menuBtnY + menuBtnH, paint)
+
+        pixelPaint.textSize = 20f; pixelPaint.color = Color.WHITE
+        canvas.drawText("MENU", W / 2f, menuBtnY + 33f, pixelPaint)
+
+        // Botão Tentar Novamente
+        val retryBtnY = H / 2f + 230f
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(200, 40, 0, 20)
+        canvas.drawRect(menuBtnX, retryBtnY, menuBtnX + menuBtnW, retryBtnY + menuBtnH, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f
+        paint.color = neonYellow
+        canvas.drawRect(menuBtnX, retryBtnY, menuBtnX + menuBtnW, retryBtnY + menuBtnH, paint)
+
+        pixelPaint.textSize = 20f; pixelPaint.color = Color.WHITE
+        canvas.drawText("TENTAR NOVAMENTE", W / 2f, retryBtnY + 33f, pixelPaint)
 
         if ((System.currentTimeMillis() / 700) % 2 == 0L) {
-            pixelPaint.textSize = 24f; pixelPaint.color = Color.WHITE
-            canvas.drawText("TOQUE PARA TENTAR DE NOVO", W / 2f, H / 2f + 200f, pixelPaint)
+            pixelPaint.textSize = 20f; pixelPaint.color = Color.argb(180, 255, 255, 255)
+            canvas.drawText("Toque para continuar", W / 2f, H / 2f + 320f, pixelPaint)
         }
-        canvas.drawBitmap(flagIcon, W / 2f - flagIcon.width / 2f, H / 2f + 230f, pixelPaint)
         pixelPaint.textAlign = Paint.Align.LEFT
     }
 
