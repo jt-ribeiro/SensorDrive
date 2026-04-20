@@ -28,11 +28,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         // Clique para calibrar (só funciona se gameView.isCalibrating for true)
         gameView.setOnClickListener {
-            if (gameView.isCalibrating) {
-                // A calibração será capturada no próximo onSensorChanged
+            if (gameView.isGameOver) {
+                // Se morreu, reinicia tudo
+                gameView.resetGame()
+            } else if (gameView.isCalibrating) {
+                // Se está a calibrar, começa o jogo
                 hasCalibratedThisGame = false
                 gameView.isCalibrating = false
-                Toast.makeText(this, "Calibrado! Use movimentos curtos (15º)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "GO! GO! GO!", Toast.LENGTH_SHORT).show()
             }
         }
     }
