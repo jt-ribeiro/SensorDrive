@@ -7,7 +7,6 @@ import android.view.MotionEvent
 import android.view.SurfaceView
 import kotlin.math.*
 import kotlin.random.Random
-import android.content.SharedPreferences
 
 class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), Runnable {
 
@@ -44,11 +43,11 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     // ── Scoring System ──────────────────────────────────────────────
     private data class ScoreEntry(val score: Int, val distance: Float, val date: String)
     private val scores = mutableListOf<ScoreEntry>()
-    private var currentDistance = 0f // em metros
+    private var currentDistance = 0f
     private var totalDistance = 0f
     private var bestDistance = 0f
     private var sessionBestScore = 0
-    private val prefs: SharedPreferences = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
+    private val prefs: android.content.SharedPreferences = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
 
     // ── Assets ──────────────────────────────────────────────────────
     private fun loadBitmap(resId: Int, targetW: Int): Bitmap {
@@ -67,12 +66,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val nitroIcon  by lazy { loadBitmap(R.drawable.nitro,           80) }
     private val starIcon   by lazy { loadBitmap(R.drawable.estrela,         44) }
     private val flagIcon   by lazy { loadBitmap(R.drawable.bandeira,        80) }
-    private val menuIcon   by lazy { loadBitmap(R.drawable.menu,            60) } // Adicionar ícone de menu
-    private val trophyIcon by lazy { loadBitmap(R.drawable.trofeu,        50) } // Adicionar ícone de troféu
 
     // ── Game State ──────────────────────────────────────────────────
     private var carX = 0f
-    private var rotationZ = 0f
     private var score = 0
     private var hiScore = 0
     private var speedMultiplier = 1.0f
@@ -122,14 +118,27 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var windSpawnTimer = 0
     private var nitroIntensity = 0f
 
+    // ── Sensor Steering (VERTICAL MODE) ─────────────────────────────
+    // Na vertical: usamos o ROLL (inclinação lateral) do acelerómetro
+    // Valor de calibração: posição neutra quando o jogador toca "Iniciar"
+    private var calibrationRoll = 0f
+    private var isCalibrated = false
+
+    // Valor processado do sensor (roll filtrado e mapeado)
+    private var steerInput = 0f
+
+    // Parâmetros de sensibilidade
+    private val sensorSmoothing = 0.20f      // Suavização (0.0=lento, 1.0=direto)
+    private val steerSensitivity = 4.5f      // Multiplicador de input → estrada
+    private val steerCurve = 1.6f            // Curva de resposta (1.0=linear, >1=mais preciso no centro)
+    private val maxSteerAngle = 0.35f        // ~20 graus de inclinação = máximo
+
     // ── Neon palette ─────────────────────────────────────────────────
     private val cyan       = Color.parseColor("#00FFFF")
     private val magenta    = Color.parseColor("#FF44FF")
     private val neonYellow = Color.parseColor("#FFEE00")
     private val neonRed    = Color.parseColor("#FF3333")
     private val darkBg     = Color.parseColor("#07001A")
-    private val menuBg     = Color.parseColor("#0A0020")
-    private val buttonBg   = Color.parseColor("#1A0033")
 
     // ── Touch handling ──────────────────────────────────────────────
     init {
@@ -149,7 +158,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     return true
                 }
                 isGameOver -> {
-                    // Verifica se tocou no botão de menu no game over
                     if (isTouchInMenuButton(x, y)) {
                         openMenu()
                         return true
@@ -162,7 +170,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     return true
                 }
                 else -> {
-                    // Verifica toque no botão de menu durante o jogo
                     if (isTouchInMenuButton(x, y)) {
                         openMenu()
                         return true
@@ -210,7 +217,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val startY = H / 2f - 100f
         val spacing = 90f
 
-        // Botão Continuar
         menuButtons.add(MenuButton(
             "CONTINUAR",
             W / 2f - btnW / 2f,
@@ -221,7 +227,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             closeMenu()
         })
 
-        // Botão Restart
         menuButtons.add(MenuButton(
             "REINICIAR",
             W / 2f - btnW / 2f,
@@ -234,7 +239,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             isCalibrating = false
         })
 
-        // Botão Ver Pontuações
         menuButtons.add(MenuButton(
             "PONTUAÇÕES",
             W / 2f - btnW / 2f,
@@ -242,11 +246,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             btnW, btnH,
             magenta
         ) {
-            // Mostra tela de pontuações
             showScoresScreen()
         })
 
-        // Botão Sair
         menuButtons.add(MenuButton(
             "SAIR",
             W / 2f - btnW / 2f,
@@ -254,13 +256,11 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             btnW, btnH,
             neonRed
         ) {
-            // Callback para a Activity fechar
             (context as? android.app.Activity)?.finish()
         })
     }
 
     private fun showScoresScreen() {
-        // Implementação da tela de pontuações
         menuButtons.clear()
         val W = width.toFloat()
         val H = height.toFloat()
@@ -276,11 +276,53 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         })
     }
 
-    // ── Sensor (low-pass filtered) ──────────────────────────────────
-    fun updateRotation(z: Float) {
+    // ── Sensor Input (VERTICAL MODE - ROLL) ─────────────────────────
+    /**
+     * NOVO SISTEMA PARA TELEMÓVEL VERTICAL
+     *
+     * Na vertical (portrait), o eixo relevante é o ROLL:
+     * - Tens o telemóvel à tua frente, vertical
+     * - Inclinas para a ESQUERDA → carro vai para a esquerda
+     * - Inclinas para a DIREITA → carro vai para a direita
+     * - Como se fosses a virar um volante!
+     *
+     * @param roll Valor do sensor (tipicamente de -PI a +PI, ou normalizado)
+     * @param pitch Não usado na direção, mas pode ser útil para debug
+     */
+    fun updateRotation(roll: Float, pitch: Float = 0f) {
         if (isGameOver || isCalibrating || isPaused) return
-        val alpha = 0.08f
-        rotationZ = rotationZ + alpha * (z - rotationZ)
+
+        // Primeira leitura = calibração da posição neutra
+        if (!isCalibrated) {
+            calibrationRoll = roll
+            isCalibrated = true
+            steerInput = 0f
+            return
+        }
+
+        // 1. Calcula desvio em relação à posição neutra
+        var delta = roll - calibrationRoll
+
+        // 2. Normaliza para evitar saltos quando passa de -PI para +PI
+        while (delta > PI) delta -= 2f * PI.toFloat()
+        while (delta < -PI) delta += 2f * PI.toFloat()
+
+        // 3. Suavização (low-pass filter) - responde rápido mas sem tremores
+        val smoothed = steerInput + sensorSmoothing * (delta - steerInput)
+
+        // 4. Aplica curva de resposta não-linear:
+        //    Centro = preciso e suave | Extremas = rápido
+        val sign = if (smoothed >= 0) 1f else -1f
+        val absInput = abs(smoothed)
+        val curved = sign * (absInput.pow(steerCurve))
+
+        // 5. Limita ao ângulo máximo de rotação (~20 graus)
+        steerInput = curved.coerceIn(-maxSteerAngle, maxSteerAngle)
+    }
+
+    // Método legacy para compatibilidade (z vira roll)
+    fun updateRotation(z: Float) {
+        updateRotation(z, 0f)
     }
 
     fun setNitro(active: Boolean) {
@@ -302,7 +344,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         roadScroll = 0f
         coneSpawnTimer = 0
         flashFrames = 0
-        rotationZ = 0f
+        steerInput = 0f
         carLean = 0f
         carScaleX = 1f
         carVelX = 0f
@@ -314,6 +356,8 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         isPaused = false
         showMenu = false
         menuAnimationProgress = 0f
+        isCalibrated = false
+        calibrationRoll = 0f
     }
 
     // ── Scoring System ──────────────────────────────────────────────
@@ -389,34 +433,41 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         }
     }
 
-    // ── Logic ───────────────────────────────────────────────────────
+    // ── Logic (STEERING VERTICAL) ───────────────────────────────────
     private fun updateLogic() {
         val W = width.toFloat()
         val H = height.toFloat()
 
-        // ── Steering ─────────────────────────────────────────────────
-        val deadzone = 0.015f
-        val input = when {
-            rotationZ >  deadzone ->  rotationZ - deadzone
-            rotationZ < -deadzone ->  rotationZ + deadzone
-            else -> 0f
-        }
-        val sensitivity = 1800f
-        val laneLeft  = W * 0.18f
-        val laneRight = W * 0.82f - carBitmap.width
-        val center    = (laneLeft + laneRight) / 2f
-        val target    = (center + input * sensitivity).coerceIn(laneLeft, laneRight)
-        carX += (target - carX) * 0.10f
+        // ── Steering (VERTICAL MODE) ─────────────────────────────────
+        // steerInput está normalizado: -1.0 = esquerda total, +1.0 = direita total, 0 = centro
+        val normalizedSteer = steerInput / maxSteerAngle  // -1.0 a 1.0
+
+        val laneLeft  = W * 0.12f
+        val laneRight = W * 0.88f - carBitmap.width
+        val laneWidth = laneRight - laneLeft
+        val centerX   = (laneLeft + laneRight) / 2f
+
+        // Mapeia input para posição na estrada com sensibilidade ajustável
+        val targetX = centerX + (normalizedSteer * steerSensitivity * laneWidth * 0.5f)
+        val clampedTarget = targetX.coerceIn(laneLeft, laneRight)
+
+        // Resposta do carro: segue suavemente o alvo
+        val carResponseSpeed = 0.10f
+        carX += (clampedTarget - carX) * carResponseSpeed
 
         // ── Car turn animation ────────────────────────────────────────
         carVelX = carX - prevCarX
         prevCarX = carX
 
-        val targetLean = (carVelX * 2.8f).coerceIn(-14f, 14f)
+        // Lean baseado na inclinação do sensor + velocidade lateral
+        val sensorLean = normalizedSteer * 12f  // Lean baseado no sensor
+        val velocityLean = (carVelX * 2.5f).coerceIn(-8f, 8f)  // Lean baseado na velocidade
+        val targetLean = (sensorLean + velocityLean).coerceIn(-18f, 18f)
         carLean += (targetLean - carLean) * 0.12f
 
-        val targetScaleX = 1f + abs(carVelX) * 0.015f
-        carScaleX += (targetScaleX - carScaleX) * 0.16f
+        // ScaleX: esticamento lateral ao virar
+        val targetScaleX = 1f + abs(carVelX) * 0.018f + abs(normalizedSteer) * 0.05f
+        carScaleX += (targetScaleX - carScaleX) * 0.18f
 
         // ── Road scroll ───────────────────────────────────────────────
         roadScroll += 18f * speedMultiplier
@@ -437,7 +488,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         // ── Score & Distance & speed ramp ─────────────────────────────
         score++
-        currentDistance += (gameSpeed * speedMultiplier) * 0.1f // metros
+        currentDistance += (gameSpeed * speedMultiplier) * 0.1f
         totalDistance += (gameSpeed * speedMultiplier) * 0.1f
 
         gameSpeed = 7f + minOf(score / 400f, 8f)
@@ -577,7 +628,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         paint.color = cyan
         canvas.drawRect(btnX, btnY, btnX + btnSize, btnY + btnSize, paint)
 
-        // Ícone de menu (3 linhas)
         paint.style = Paint.Style.FILL
         paint.color = cyan
         val lineW = 30f
@@ -596,8 +646,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     // ── Menu Overlay ────────────────────────────────────────────────
     private fun drawMenuOverlay(canvas: Canvas, W: Float, H: Float) {
         val alpha = (menuAnimationProgress * 220).toInt()
-
-        // Fundo escuro semi-transparente
         paint.color = Color.argb(alpha, 0, 0, 10)
         canvas.drawRect(0f, 0f, W, H, paint)
 
@@ -605,13 +653,11 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         val contentAlpha = ((menuAnimationProgress - 0.3f) / 0.7f).coerceIn(0f, 1f)
 
-        // Título do menu
         pixelPaint.textAlign = Paint.Align.CENTER
         pixelPaint.textSize = 48f
         pixelPaint.color = Color.argb((contentAlpha * 255).toInt(), 0, 255, 255)
         canvas.drawText("MENU", W / 2f, H / 2f - 200f, pixelPaint)
 
-        // Botões
         for (button in menuButtons) {
             drawMenuButton(canvas, button, contentAlpha)
         }
@@ -622,24 +668,20 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun drawMenuButton(canvas: Canvas, button: MenuButton, alpha: Float) {
         val a = (alpha * 255).toInt()
 
-        // Sombra/glow
         paint.maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.SOLID)
         paint.color = Color.argb((alpha * 60).toInt(), Color.red(button.color), Color.green(button.color), Color.blue(button.color))
         paint.style = Paint.Style.FILL
         canvas.drawRect(button.x - 4f, button.y - 4f, button.x + button.width + 4f, button.y + button.height + 4f, paint)
         paint.maskFilter = null
 
-        // Fundo do botão
         paint.color = Color.argb((alpha * 220).toInt(), 26, 0, 51)
         canvas.drawRect(button.x, button.y, button.x + button.width, button.y + button.height, paint)
 
-        // Borda neon
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 3f
         paint.color = Color.argb(a, Color.red(button.color), Color.green(button.color), Color.blue(button.color))
         canvas.drawRect(button.x, button.y, button.x + button.width, button.y + button.height, paint)
 
-        // Texto
         pixelPaint.textAlign = Paint.Align.CENTER
         pixelPaint.textSize = 24f
         pixelPaint.color = Color.argb(a, 255, 255, 255)
@@ -714,19 +756,15 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun drawPlayfield(canvas: Canvas, W: Float, H: Float) {
         if (isGameOver || isCalibrating) return
 
-        // Collision flash
         if (flashFrames > 0) {
             paint.color = Color.argb((flashFrames * 18).coerceAtMost(160), 255, 40, 40)
             canvas.drawRect(0f, 0f, W, H, paint)
         }
 
-        // Wind tunnel
         if (nitroIntensity > 0.01f) drawWindTunnel(canvas, W, H)
 
-        // Cones
         for (c in cones) canvas.drawBitmap(coneBitmap, c.x, c.y, pixelPaint)
 
-        // ── Car ───────────────────────────────────────────────────────
         val carCX = carX + carBitmap.width / 2f
         val carCY = H - 350f + carBitmap.height / 2f
 
@@ -737,7 +775,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         canvas.rotate(carLean)
         canvas.scale(carScaleX, 1f)
 
-        // Nitro exhaust flame
         if (isNitroActive) {
             val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG)
             flamePaint.shader = LinearGradient(
@@ -767,7 +804,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         canvas.drawBitmap(carBitmap, -carBitmap.width / 2f, -carBitmap.height / 2f, pixelPaint)
         canvas.restore()
 
-        // Popups
         for (p in popups) {
             pixelPaint.color = p.color; pixelPaint.textSize = 30f
             pixelPaint.alpha = ((p.life / 40f) * 255).toInt().coerceIn(0, 255)
@@ -846,21 +882,18 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     // ── HUD ──────────────────────────────────────────────────────────
     private fun drawHUD(canvas: Canvas, W: Float, H: Float) {
-        // Caixa de pontos (esquerda)
         drawHudBox(canvas, 20f, 20f, 200f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = cyan
         canvas.drawText("PONTOS", 40f, 52f, pixelPaint)
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$score", 40f, 88f, pixelPaint)
 
-        // Caixa de recorde (centro)
         drawHudBox(canvas, W / 2f - 110f, 20f, 220f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = neonYellow
         canvas.drawText("RECORDE", W / 2f - 90f, 52f, pixelPaint)
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$hiScore", W / 2f - 90f, 88f, pixelPaint)
 
-        // Caixa de velocidade (direita)
         val kmh = (80f * speedMultiplier + (speedMultiplier - 1f) * 120f).toInt()
         drawHudBox(canvas, W - 220f, 20f, 200f, 90f)
         pixelPaint.textSize = 18f; pixelPaint.color = magenta
@@ -868,7 +901,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("$kmh km/h", W - 200f, 88f, pixelPaint)
 
-        // Distância (abaixo dos pontos)
         drawHudBox(canvas, 20f, 120f, 200f, 70f)
         pixelPaint.textSize = 16f; pixelPaint.color = Color.parseColor("#00FF88")
         canvas.drawText("DISTÂNCIA", 40f, 148f, pixelPaint)
@@ -924,25 +956,31 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     // ── Calibration ───────────────────────────────────────────────────
     private fun drawCalibrate(canvas: Canvas, W: Float, H: Float) {
-        paint.color = Color.argb(200, 0, 0, 15)
+        paint.color = Color.argb(220, 0, 0, 15)
         canvas.drawRect(0f, 0f, W, H, paint)
 
         pixelPaint.textAlign = Paint.Align.CENTER
-        pixelPaint.textSize = 52f; pixelPaint.color = cyan
-        canvas.drawText("SENSOR", W / 2f, H / 2f - 260f, pixelPaint)
+
+        pixelPaint.textSize = 56f; pixelPaint.color = cyan
+        canvas.drawText("SENSOR", W / 2f, H / 2f - 280f, pixelPaint)
         pixelPaint.color = magenta
-        canvas.drawText("DRIVE", W / 2f, H / 2f - 200f, pixelPaint)
+        canvas.drawText("DRIVE", W / 2f, H / 2f - 220f, pixelPaint)
 
-        pixelPaint.textSize = 20f; pixelPaint.color = neonYellow
-        canvas.drawText("SEGURE O TELEFONE", W / 2f, H / 2f - 130f, pixelPaint)
-        canvas.drawText("NA POSIÇÃO DE CONDUZIR", W / 2f, H / 2f - 100f, pixelPaint)
+        pixelPaint.textSize = 22f; pixelPaint.color = neonYellow
+        canvas.drawText("SEGURA O TELEMÓVEL", W / 2f, H / 2f - 140f, pixelPaint)
+        canvas.drawText("NA VERTICAL", W / 2f, H / 2f - 110f, pixelPaint)
 
-        canvas.drawBitmap(phoneIcon, W / 2f - phoneIcon.width / 2f, H / 2f - 70f, pixelPaint)
+        pixelPaint.textSize = 18f; pixelPaint.color = Color.argb(200, 255, 255, 255)
+        canvas.drawText("Inclina para a ESQUERDA / DIREITA", W / 2f, H / 2f - 60f, pixelPaint)
+        canvas.drawText("como se fosses a virar um volante", W / 2f, H / 2f - 35f, pixelPaint)
 
-        if ((System.currentTimeMillis() / 600) % 2 == 0L) {
-            pixelPaint.textSize = 22f; pixelPaint.color = Color.WHITE
-            canvas.drawText("TOQUE PARA INICIAR", W / 2f, H / 2f + 60f, pixelPaint)
+        canvas.drawBitmap(phoneIcon, W / 2f - phoneIcon.width / 2f, H / 2f - 10f, pixelPaint)
+
+        if ((System.currentTimeMillis() / 500) % 2 == 0L) {
+            pixelPaint.textSize = 24f; pixelPaint.color = Color.WHITE
+            canvas.drawText("TOQUE QUANDO ESTIVERES PRONTO", W / 2f, H / 2f + 100f, pixelPaint)
         }
+
         pixelPaint.textAlign = Paint.Align.LEFT
     }
 
@@ -957,23 +995,19 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         pixelPaint.color = Color.argb((255 * pulse).toInt(), 255, 40, 40)
         canvas.drawText("GAME OVER", W / 2f, H / 2f - 180f, pixelPaint)
 
-        // Pontuação final
         pixelPaint.textSize = 28f; pixelPaint.color = Color.WHITE
         canvas.drawText("PONTUAÇÃO FINAL", W / 2f, H / 2f - 100f, pixelPaint)
         pixelPaint.textSize = 52f; pixelPaint.color = cyan
         canvas.drawText("$score", W / 2f, H / 2f - 30f, pixelPaint)
 
-        // Distância
         pixelPaint.textSize = 22f; pixelPaint.color = Color.parseColor("#00FF88")
         val distStr = String.format("Distância: %.1f m", currentDistance)
         canvas.drawText(distStr, W / 2f, H / 2f + 20f, pixelPaint)
 
-        // Recorde
         canvas.drawBitmap(starIcon, W / 2f - starIcon.width / 2f, H / 2f + 50f, pixelPaint)
         pixelPaint.textSize = 22f; pixelPaint.color = neonYellow
         canvas.drawText("RECORDE: $hiScore", W / 2f, H / 2f + 120f, pixelPaint)
 
-        // Botão Menu
         val menuBtnX = W / 2f - 100f
         val menuBtnY = H / 2f + 160f
         val menuBtnW = 200f
@@ -990,7 +1024,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         pixelPaint.textSize = 20f; pixelPaint.color = Color.WHITE
         canvas.drawText("MENU", W / 2f, menuBtnY + 33f, pixelPaint)
 
-        // Botão Tentar Novamente
         val retryBtnY = H / 2f + 230f
         paint.style = Paint.Style.FILL
         paint.color = Color.argb(200, 40, 0, 20)

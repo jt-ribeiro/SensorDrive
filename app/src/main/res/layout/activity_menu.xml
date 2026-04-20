@@ -1,40 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0D0015"> <ImageView
-    android:id="@+id/logo"
-    android:layout_width="300dp"
-    android:layout_height="150dp"
-    android:layout_centerHorizontal="true"
-    android:layout_marginTop="50dp"
-    android:src="@drawable/carro_lateral" />
+    android:background="@drawable/menu_gradient_bg">
 
-    <TextView
+    <LinearLayout
+        android:id="@+id/headerContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/logo"
         android:layout_centerHorizontal="true"
-        android:text="SENSOR DRIVE"
-        android:textColor="#00FFFF"
-        android:textSize="40sp"
-        android:textStyle="bold" />
+        android:layout_marginTop="60dp"
+        android:gravity="center"
+        android:orientation="vertical">
 
-    <Button
-        android:id="@+id/btnStart"
-        android:layout_width="200dp"
+        <ImageView
+            android:id="@+id/logo"
+            android:layout_width="280dp"
+            android:layout_height="140dp"
+            android:src="@drawable/carro_lateral"
+            android:adjustViewBounds="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="SENSOR DRIVE"
+            android:textColor="#00FFFF"
+            android:textSize="36sp"
+            android:textStyle="bold"
+            android:shadowColor="#00FFFF"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:shadowRadius="15" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
-        android:backgroundTint="#FF00FF"
-        android:text="INICIAR CORRIDA"
-        android:textColor="#FFFFFF" />
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="20dp">
 
-    <ImageView
-        android:layout_width="80dp"
-        android:layout_height="80dp"
+        <Button
+            android:id="@+id/btnStart"
+            android:layout_width="260dp"
+            android:layout_height="65dp"
+            android:backgroundTint="#FF00FF"
+            android:fontFamily="monospace"
+            android:text="INICIAR CORRIDA"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:cornerRadius="8dp"
+            android:elevation="10dp" />
+
+        <TextView
+            android:id="@+id/txtHighScore"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="15dp"
+            android:fontFamily="monospace"
+            android:text="RECORDE: 0000"
+            android:textColor="#FFEE00"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
-        android:layout_marginBottom="30dp"
-        android:src="@drawable/telemovel" />
+        android:layout_marginBottom="40dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:fontFamily="monospace"
+            android:text="CONTROLO POR MOVIMENTO"
+            android:textColor="#66FFFFFF"
+            android:textSize="10sp" />
+
+        <ImageView
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:src="@drawable/telemovel"
+            android:alpha="0.6" />
+    </LinearLayout>
 
 </RelativeLayout>

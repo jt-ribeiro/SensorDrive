@@ -2,9 +2,11 @@ package com.example.sensordrive
 
 
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import kotlin.jvm.java
 
@@ -19,5 +21,12 @@ class MenuActivity : AppCompatActivity() {
             val intent = Intent(this, MainActivity::class.java)
             startActivity(intent)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val prefs = getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
+        val hiScore = prefs.getInt("hiScore", 0)
+        findViewById<TextView>(R.id.txtHighScore).text = "RECORDE: $hiScore"
     }
 }
