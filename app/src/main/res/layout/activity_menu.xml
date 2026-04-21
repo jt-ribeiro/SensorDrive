@@ -6,20 +6,18 @@
     android:background="@drawable/menu_gradient_bg">
 
     <LinearLayout
-        android:id="@+id/headerContainer"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerHorizontal="true"
-        android:layout_marginTop="60dp"
+        android:id="@+id/layoutMenu"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:padding="20dp">
 
         <ImageView
-            android:id="@+id/logo"
             android:layout_width="280dp"
             android:layout_height="140dp"
             android:src="@drawable/carro_lateral"
-            android:adjustViewBounds="true" />
+            android:layout_marginBottom="10dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -30,66 +28,95 @@
             android:textSize="36sp"
             android:textStyle="bold"
             android:shadowColor="#00FFFF"
-            android:shadowDx="0"
-            android:shadowDy="0"
-            android:shadowRadius="15" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="20dp">
+            android:shadowDx="0" android:shadowDy="0" android:shadowRadius="15"
+            android:layout_marginBottom="40dp" />
 
         <Button
             android:id="@+id/btnStart"
             android:layout_width="260dp"
-            android:layout_height="65dp"
+            android:layout_height="60dp"
             android:backgroundTint="#FF00FF"
             android:fontFamily="monospace"
             android:text="INICIAR CORRIDA"
             android:textColor="#FFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
-            app:cornerRadius="8dp"
-            android:elevation="10dp" />
+            app:cornerRadius="8dp" />
+
+        <Button
+            android:id="@+id/btnInstrucoes"
+            android:layout_width="260dp"
+            android:layout_height="60dp"
+            android:layout_marginTop="15dp"
+            android:backgroundTint="#00FFFF"
+            android:fontFamily="monospace"
+            android:text="COMO JOGAR"
+            android:textColor="#07001A"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:cornerRadius="8dp" />
 
         <TextView
             android:id="@+id/txtHighScore"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="15dp"
+            android:layout_marginTop="30dp"
             android:fontFamily="monospace"
-            android:text="RECORDE: 0000"
+            android:text="RECORDE: 0"
             android:textColor="#FFEE00"
-            android:textSize="14sp" />
+            android:textSize="16sp" />
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/layoutInstrucoes"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:padding="24dp"
+        android:background="#F207001A"> <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:layout_centerHorizontal="true"
-        android:layout_marginBottom="40dp"
-        android:gravity="center"
-        android:orientation="vertical">
+        android:fontFamily="monospace"
+        android:text="INSTRUÇÕES"
+        android:textColor="#FF44FF"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:layout_marginTop="30dp"
+        android:layout_marginBottom="30dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
+            <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/telemovel" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Inclina o telemóvel para a ESQUERDA ou DIREITA para conduzires o carro." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
+            <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/nitro" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Aproxima a mão do topo do tecrã (Sensor de Proximidade) para usar o Nitro Manual." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
+            <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/estrela" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Apanha as ESTRELAS para ganhares 5 segundos de Velocidade e Nitro Infinito!" android:textColor="#00FFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="40dp">
+            <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/cones" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Evita os CONES! Os normais tiram-te Energia. Os Roxos invertem os teus controlos!" android:textColor="#FFEE00" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnVoltar"
+            android:layout_width="200dp"
+            android:layout_height="55dp"
+            android:backgroundTint="#FF3333"
             android:fontFamily="monospace"
-            android:text="CONTROLO POR MOVIMENTO"
-            android:textColor="#66FFFFFF"
-            android:textSize="10sp" />
-
-        <ImageView
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:src="@drawable/telemovel"
-            android:alpha="0.6" />
+            android:text="VOLTAR AO MENU"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:cornerRadius="8dp" />
     </LinearLayout>
 
 </RelativeLayout>
