@@ -37,7 +37,7 @@
             android:layout_height="60dp"
             android:backgroundTint="#FF00FF"
             android:fontFamily="monospace"
-            android:text="INICIAR CORRIDA"
+            android:text="START RACE"
             android:textColor="#FFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -50,21 +50,12 @@
             android:layout_marginTop="15dp"
             android:backgroundTint="#00FFFF"
             android:fontFamily="monospace"
-            android:text="COMO JOGAR"
+            android:text="HOW TO PLAY"
             android:textColor="#07001A"
             android:textSize="18sp"
             android:textStyle="bold"
             app:cornerRadius="8dp" />
 
-        <TextView
-            android:id="@+id/txtHighScore"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="30dp"
-            android:fontFamily="monospace"
-            android:text="RECORDE: 0"
-            android:textColor="#FFEE00"
-            android:textSize="16sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -79,7 +70,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
-        android:text="INSTRUÇÕES"
+        android:text="INSTRUCTIONS"
         android:textColor="#FF44FF"
         android:textSize="32sp"
         android:textStyle="bold"
@@ -88,22 +79,22 @@
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
             <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/telemovel" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Inclina o telemóvel para a ESQUERDA ou DIREITA para conduzires o carro." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tilt your phone LEFT or RIGHT to steer the car." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
             <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/nitro" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Aproxima a mão do topo do tecrã (Sensor de Proximidade) para usar o Nitro Manual." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Hover your hand over the top of the screen (Proximity Sensor) to use Manual Nitro." android:textColor="#FFFFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="20dp">
             <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/estrela" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Apanha as ESTRELAS para ganhares 5 segundos de Velocidade e Nitro Infinito!" android:textColor="#00FFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Collect STARS to gain 5 seconds of Speed and Infinite Nitro!" android:textColor="#00FFFF" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="40dp">
             <ImageView android:layout_width="50dp" android:layout_height="50dp" android:src="@drawable/cones" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Evita os CONES! Os normais tiram-te Energia. Os Roxos invertem os teus controlos!" android:textColor="#FFEE00" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Avoid CONES! Normal ones drain Energy. Purple ones invert your controls!" android:textColor="#FFEE00" android:fontFamily="monospace" android:textSize="14sp" android:layout_marginStart="15dp" />
         </LinearLayout>
 
         <Button
@@ -112,7 +103,7 @@
             android:layout_height="55dp"
             android:backgroundTint="#FF3333"
             android:fontFamily="monospace"
-            android:text="VOLTAR AO MENU"
+            android:text="BACK TO MENU"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:textStyle="bold"
