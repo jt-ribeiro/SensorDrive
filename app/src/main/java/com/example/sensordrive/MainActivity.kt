@@ -33,8 +33,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         setContentView(R.layout.activity_main)
 
         gameView = findViewById(R.id.gameView)
-
-        // Passar a referência da MainActivity para a GameView poder chamar os sons
         gameView.setAudioController(this)
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -46,12 +44,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun setupAudio() {
         try {
-            // Música de Fundo (Loop)
+            // Música de Fundo (Sempre a tocar)
             bgMusic = MediaPlayer.create(this, R.raw.musica_fundo)
             bgMusic?.isLooping = true
             bgMusic?.setVolume(0.4f, 0.4f)
 
-            // Som do Motor (Loop) - A 75% conforme pedido
+            // Som do Motor (Apenas quando a conduzir) a 75%
             carMusic = MediaPlayer.create(this, R.raw.car_sound)
             carMusic?.isLooping = true
             carMusic?.setVolume(0.75f, 0.75f)
@@ -63,11 +61,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 .build()
 
             soundPool = SoundPool.Builder()
-                .setMaxStreams(5) // Pode tocar até 5 sons ao mesmo tempo
+                .setMaxStreams(5)
                 .setAudioAttributes(audioAttributes)
                 .build()
 
-            // Carregar sons curtos (devem estar na pasta res/raw)
             somEstrelaId = soundPool.load(this, R.raw.estrela_coletada, 1)
             somEmbateId = soundPool.load(this, R.raw.embate, 1)
             somPerdeuId = soundPool.load(this, R.raw.perdeu, 1)
@@ -77,13 +74,22 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // Função que será chamada pela GameView
+    // Função que será chamada pela GameView para os FX
     fun playSoundFX(type: String) {
         when (type) {
             "ESTRELA" -> soundPool.play(somEstrelaId, 1f, 1f, 1, 0, 1f)
             "EMBATE_NORMAL" -> soundPool.play(somEmbateId, 1f, 1f, 1, 0, 1f)
-            "EMBATE_ROXO" -> soundPool.play(somEmbateId, 1f, 1f, 1, 0, 1.5f) // Pitch +50%
+            "EMBATE_ROXO" -> soundPool.play(somEmbateId, 1f, 1f, 1, 0, 1.5f) // Pitch +50% (1.5x)
             "PERDEU" -> soundPool.play(somPerdeuId, 1f, 1f, 1, 0, 1f)
+        }
+    }
+
+    // Função para ligar/desligar o som do motor dinamicamente
+    fun setCarEnginePlaying(play: Boolean) {
+        if (play) {
+            if (carMusic?.isPlaying == false) carMusic?.start()
+        } else {
+            if (carMusic?.isPlaying == true) carMusic?.pause()
         }
     }
 
@@ -98,11 +104,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val roll = orientation[2]
                 gameView.updateSensor(roll)
 
-                // ── ÁUDIO 3D (STEREO PANNING) ──
+                // Panning Áudio Estéreo (Base Volume = 75%)
                 val steer = gameView.getCurrentSteer()
-
-                var leftVol = 0.75f - (steer * 0.5f)
-                var rightVol = 0.75f + (steer * 0.5f)
+                var leftVol = 0.75f - (steer * 0.4f)
+                var rightVol = 0.75f + (steer * 0.4f)
 
                 leftVol = leftVol.coerceIn(0.1f, 0.75f)
                 rightVol = rightVol.coerceIn(0.1f, 0.75f)
@@ -127,7 +132,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onResume()
         gameView.resume()
         bgMusic?.start()
-        carMusic?.start()
         rotationSensor?.let  { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
         proximitySensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)  }
     }

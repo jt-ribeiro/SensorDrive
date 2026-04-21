@@ -11,10 +11,16 @@ import android.content.SharedPreferences
 
 class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), Runnable {
 
-    // Controlador para tocar os sons na MainActivity
+    // Controlador de Áudio
     private var audioController: MainActivity? = null
-    fun setAudioController(controller: MainActivity) {
-        audioController = controller
+    fun setAudioController(activity: MainActivity) {
+        audioController = activity
+    }
+
+    // Função que verifica se estamos a conduzir e liga/desliga o som do motor
+    private fun updateAudioState() {
+        val isDriving = !isCalibrating && !isGameOver && !isPaused && !showMenu && !showScores
+        audioController?.setCarEnginePlaying(isDriving)
     }
 
     // ── Thread & State ──────────────────────────────────────────────
@@ -116,7 +122,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var steerInput = 0f
     private val FILTER_ALPHA = 0.15f
     private val DEADZONE     = 0.03f
-    private val MAX_TILT     = 0.35f
+    private val MAX_TILT     = 0.40f
 
     fun getCurrentSteer(): Float = steerInput
 
@@ -124,7 +130,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         rawRoll = raw
         if (isGameOver || isCalibrating || isPaused) return
 
-        val delta = rawRoll - rollOffset
+        var delta = rawRoll - rollOffset
+        while (delta > Math.PI) delta -= (2 * Math.PI).toFloat()
+        while (delta < -Math.PI) delta += (2 * Math.PI).toFloat()
 
         sensorFiltered += FILTER_ALPHA * (delta - sensorFiltered)
 
@@ -134,7 +142,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             else -> 0f
         }
 
-        var finalSteer = (afterDz / MAX_TILT).coerceIn(-1f, 1f)
+        var finalSteer = (afterDz / (MAX_TILT - DEADZONE)).coerceIn(-1f, 1f)
 
         if (System.currentTimeMillis() < confusionEndTime) {
             finalSteer *= -1f
@@ -192,21 +200,27 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         when {
             showScores -> {
-                if (isInRect(x, y, W/2f-100f, H-130f, 200f, 55f)) showScores = false
+                if (isInRect(x, y, W/2f-100f, H-130f, 200f, 55f)) {
+                    showScores = false
+                    updateAudioState()
+                }
                 return true
             }
             showMenu -> { handleMenuTouch(x, y, W, H); return true }
             isGameOver -> {
                 val bw = 260f; val bh = 52f; val bx = W/2f - bw/2f
-                if (isInRect(x, y, bx, H*0.77f, bw, bh)) { resetGame(); isCalibrating = false; rollOffset = rawRoll; sensorFiltered = 0f }
+                if (isInRect(x, y, bx, H*0.77f, bw, bh)) { resetGame(); isCalibrating = false; rollOffset = rawRoll; sensorFiltered = 0f; updateAudioState() }
                 if (isInRect(x, y, bx, H*0.87f, bw, bh)) { resetGame(); openMenu() }
                 return true
             }
             isCalibrating -> {
                 rollOffset = rawRoll; sensorFiltered = 0f; steerInput = 0f; isCalibrating = false
+                updateAudioState()
                 return true
             }
-            else -> { if (isInRect(x, y, W-80f, 20f, 60f, 60f)) { openMenu(); return true } }
+            else -> {
+                if (isInRect(x, y, W-80f, 120f, 60f, 60f)) { openMenu(); return true }
+            }
         }
         return super.onTouchEvent(event)
     }
@@ -217,14 +231,14 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val bw = 280f; val bh = 65f; val bx = W/2f - bw/2f; val sy = H/2f - 80f; val g = 80f
         when {
             isInRect(x, y, bx, sy,       bw, bh) -> closeMenu()
-            isInRect(x, y, bx, sy+g,     bw, bh) -> { closeMenu(); resetGame(); rollOffset = rawRoll; sensorFiltered = 0f; isCalibrating = false }
+            isInRect(x, y, bx, sy+g,     bw, bh) -> { closeMenu(); resetGame(); rollOffset = rawRoll; sensorFiltered = 0f; isCalibrating = false; updateAudioState() }
             isInRect(x, y, bx, sy+g*2f,  bw, bh) -> showScores = true
             isInRect(x, y, bx, sy+g*3f,  bw, bh) -> (context as? android.app.Activity)?.finish()
         }
     }
 
-    private fun openMenu()  { isPaused = true;  showMenu = true; setupMenuButtons() }
-    private fun closeMenu() { isPaused = false; showMenu = false }
+    private fun openMenu()  { isPaused = true;  showMenu = true; setupMenuButtons(); updateAudioState() }
+    private fun closeMenu() { isPaused = false; showMenu = false; updateAudioState() }
 
     private fun setupMenuButtons() {
         menuButtons.clear()
@@ -254,6 +268,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         nitroIntensity = 0f; windSpawnTimer = 0
         isGameOver = false; isCalibrating = true; isPaused = false; showMenu = false; menuAnimationProgress = 0f
         if (isInitialized) carX = width / 2f - carBitmap.width / 2f
+        updateAudioState()
     }
 
     private fun saveHiScore() { if (score > hiScore) { hiScore = score; prefs.edit().putInt("hiScore", hiScore).apply() } }
@@ -328,8 +343,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             val spawnRight = W * 0.85f - coneBitmap.width
             val isPurple = rng.nextInt(100) < 15
             cones.add(Cone(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f, isPurple))
-            val baseTime = 60 - minOf(score / 50, 45)
-            coneSpawnTimer = (baseTime / distanceSpeedMultiplier).toInt().coerceAtLeast(12)
+
+            val baseTime = 45 - minOf(score / 40, 35)
+            coneSpawnTimer = (baseTime / distanceSpeedMultiplier).toInt().coerceAtLeast(7)
         }
 
         if (rng.nextInt(350) == 0) {
@@ -355,7 +371,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     s.hit = true
                     starIter.remove()
 
-                    // ── SOM: ESTRELA ──
+                    // SOM ESTRELA
                     audioController?.playSoundFX("ESTRELA")
 
                     bonusNitroEndTime = System.currentTimeMillis() + 5000L
@@ -390,25 +406,23 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     currentStreak = 0
 
                     if (c.isPurple) {
-                        // ── SOM: EMBATE CONE ROXO (+50% Pitch) ──
+                        // SOM CONE ROXO (PITCH ALTO)
                         audioController?.playSoundFX("EMBATE_ROXO")
-
                         confusionEndTime = System.currentTimeMillis() + 3000L
                         popups.add(Popup("ALERTA: INVERTIDO", magenta, carX+carBitmap.width/2f, carCY-20f, 50))
                     } else {
-                        // ── SOM: EMBATE CONE NORMAL ──
+                        // SOM CONE NORMAL
                         audioController?.playSoundFX("EMBATE_NORMAL")
-
                         lives--
                         flashFrames = 12
                         popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
 
                         if (lives <= 0) {
-                            // ── SOM: PERDEU AS VIDAS (GAME OVER) ──
+                            // SOM GAME OVER
                             audioController?.playSoundFX("PERDEU")
-
                             isGameOver = true
                             saveHiScore()
+                            updateAudioState() // Desliga o som do motor
                             return
                         }
                     }
@@ -549,12 +563,27 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun drawTyreTracks(canvas: Canvas, cx: Float, cy: Float) {
-        val v = abs(carVelX); if (v < 0.4f) return
+        val v = abs(carVelX)
+        if (v < 0.4f) return
+
         val tc = if (carVelX > 0) cyan else magenta
-        paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f
-        paint.color = Color.argb(((v-0.4f)/2.5f*170f).toInt().coerceIn(0,170), Color.red(tc), Color.green(tc), Color.blue(tc))
-        val ox = carBitmap.width*0.30f; val wy = cy+carBitmap.height/2f-8f; val tl = (v*20f).coerceAtMost(45f)
-        canvas.drawLine(cx-ox,wy,cx-ox,wy+tl,paint); canvas.drawLine(cx+ox,wy,cx+ox,wy+tl,paint)
+
+        val trackAlpha = ((v - 0.4f) / 2.5f * 170f).toInt().coerceIn(0, 170)
+        val r = Color.red(tc)
+        val g = Color.green(tc)
+        val b = Color.blue(tc)
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+
+        paint.color = Color.argb(trackAlpha, r, g, b)
+
+        val ox = carBitmap.width * 0.30f
+        val wy = cy + carBitmap.height / 2f - 8f
+        val tl = (v * 20f).coerceAtMost(45f)
+
+        canvas.drawLine(cx - ox, wy, cx - ox, wy + tl, paint)
+        canvas.drawLine(cx + ox, wy, cx + ox, wy + tl, paint)
         paint.style = Paint.Style.FILL
     }
 
@@ -637,7 +666,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun drawMenuBtn(canvas: Canvas, W: Float) {
-        val bx=W-78f; val by=20f; val bs=56f
+        val bx=W-78f; val by=120f; val bs=56f
         paint.style=Paint.Style.FILL; paint.color=Color.argb(180,0,0,20); canvas.drawRect(bx,by,bx+bs,by+bs,paint)
         paint.style=Paint.Style.STROKE; paint.strokeWidth=2f; paint.color=cyan; canvas.drawRect(bx,by,bx+bs,by+bs,paint)
         paint.style=Paint.Style.FILL; paint.color=cyan
