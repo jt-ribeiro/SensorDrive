@@ -2,6 +2,9 @@ package com.example.sensordrive
 
 import android.content.Context
 import android.graphics.*
+import android.graphics.drawable.AnimatedImageDrawable
+import android.graphics.drawable.Drawable
+import android.os.Build
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.SurfaceView
@@ -17,7 +20,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         audioController = activity
     }
 
-    // Função que verifica se estamos a conduzir e liga/desliga o som do motor
     private fun updateAudioState() {
         val isDriving = !isCalibrating && !isGameOver && !isPaused && !showMenu && !showScores
         audioController?.setCarEnginePlaying(isDriving)
@@ -54,6 +56,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     private val carRect = RectF()
     private val objRect = RectF()
+    private val lightningPath = Path()
 
     // ── Menu System ─────────────────────────────────────────────────
     private data class MenuButton(val text: String, val x: Float, val y: Float, val width: Float, val height: Float, val color: Int, val action: () -> Unit)
@@ -69,7 +72,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
     private var distanceSpeedMultiplier = 1.0f
     private var nextDistanceThreshold = 5000f
-
     private var confusionEndTime = 0L
 
     private val prefs = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
@@ -80,6 +82,9 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private lateinit var phoneIcon: Bitmap
     private lateinit var nitroIcon: Bitmap
     private lateinit var starIcon: Bitmap
+
+    // Fundo GIF (Método Moderno e Seguro)
+    private var bgGifDrawable: Drawable? = null
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -96,6 +101,17 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         phoneIcon = loadBitmap(R.drawable.telemovel, (screenWidth * 0.12f).toInt())
         nitroIcon = loadBitmap(R.drawable.nitro, (screenWidth * 0.10f).toInt())
         starIcon = loadBitmap(R.drawable.estrela, (screenWidth * 0.10f).toInt())
+
+        // Carregar GIF com a API moderna (Android 9+)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val source = ImageDecoder.createSource(resources, R.raw.fundo)
+                bgGifDrawable = ImageDecoder.decodeDrawable(source)
+                (bgGifDrawable as? AnimatedImageDrawable)?.start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun loadBitmap(resId: Int, targetW: Int): Bitmap {
@@ -105,6 +121,19 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val scaled = Bitmap.createScaledBitmap(raw, targetW, h, true)
         raw.recycle()
         return scaled
+    }
+
+    // Função matemática para desenhar um Raio perfeito (Sem precisar de emojis)
+    private fun getLightningPath(x: Float, y: Float, w: Float, h: Float): Path {
+        lightningPath.reset()
+        lightningPath.moveTo(x + w * 0.6f, y) // Topo
+        lightningPath.lineTo(x + w * 0.1f, y + h * 0.55f) // Desce para a esquerda
+        lightningPath.lineTo(x + w * 0.5f, y + h * 0.55f) // Entra para o meio
+        lightningPath.lineTo(x + w * 0.3f, y + h) // Ponta em baixo
+        lightningPath.lineTo(x + w * 0.9f, y + h * 0.45f) // Sobe para a direita
+        lightningPath.lineTo(x + w * 0.5f, y + h * 0.45f) // Entra para o meio
+        lightningPath.close() // Liga ao topo
+        return lightningPath
     }
 
     // ── Neon palette ─────────────────────────────────────────────────
@@ -130,9 +159,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         rawRoll = raw
         if (isGameOver || isCalibrating || isPaused) return
 
-        var delta = rawRoll - rollOffset
-        while (delta > Math.PI) delta -= (2 * Math.PI).toFloat()
-        while (delta < -Math.PI) delta += (2 * Math.PI).toFloat()
+        val delta = rawRoll - rollOffset
 
         sensorFiltered += FILTER_ALPHA * (delta - sensorFiltered)
 
@@ -142,7 +169,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             else -> 0f
         }
 
-        var finalSteer = (afterDz / (MAX_TILT - DEADZONE)).coerceIn(-1f, 1f)
+        var finalSteer = (afterDz / MAX_TILT).coerceIn(-1f, 1f)
 
         if (System.currentTimeMillis() < confusionEndTime) {
             finalSteer *= -1f
@@ -371,7 +398,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     s.hit = true
                     starIter.remove()
 
-                    // SOM ESTRELA
                     audioController?.playSoundFX("ESTRELA")
 
                     bonusNitroEndTime = System.currentTimeMillis() + 5000L
@@ -406,23 +432,20 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                     currentStreak = 0
 
                     if (c.isPurple) {
-                        // SOM CONE ROXO (PITCH ALTO)
                         audioController?.playSoundFX("EMBATE_ROXO")
                         confusionEndTime = System.currentTimeMillis() + 3000L
                         popups.add(Popup("ALERTA: INVERTIDO", magenta, carX+carBitmap.width/2f, carCY-20f, 50))
                     } else {
-                        // SOM CONE NORMAL
                         audioController?.playSoundFX("EMBATE_NORMAL")
                         lives--
                         flashFrames = 12
                         popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
 
                         if (lives <= 0) {
-                            // SOM GAME OVER
                             audioController?.playSoundFX("PERDEU")
                             isGameOver = true
                             saveHiScore()
-                            updateAudioState() // Desliga o som do motor
+                            updateAudioState()
                             return
                         }
                     }
@@ -476,7 +499,14 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun drawFrame(canvas: Canvas) {
         val W = width.toFloat(); val H = height.toFloat()
 
-        canvas.drawColor(darkBg)
+        // DESENHAR O GIF DE FUNDO (Moderno e Crash-free)
+        if (bgGifDrawable != null) {
+            bgGifDrawable?.setBounds(0, 0, W.toInt(), H.toInt())
+            bgGifDrawable?.draw(canvas)
+        } else {
+            canvas.drawColor(darkBg)
+        }
+
         drawRoad(canvas, W, H)
 
         when {
@@ -575,7 +605,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f
-
         paint.color = Color.argb(trackAlpha, r, g, b)
 
         val ox = carBitmap.width * 0.30f
@@ -622,10 +651,13 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         pixelPaint.textSize = 24f
         pixelPaint.color = neonYellow
         canvas.drawText("ENERGIA:", 30f, 135f, pixelPaint)
+
+        // Desenhar Vidas como Raios Geométricos Vectoriais
         paint.style = Paint.Style.FILL
         paint.color = neonYellow
         for (i in 0 until lives) {
-            canvas.drawRect(140f + (i * 30f), 115f, 160f + (i * 30f), 135f, paint)
+            val px = 145f + (i * 35f)
+            canvas.drawPath(getLightningPath(px, 110f, 18f, 28f), paint)
         }
 
         drawNitroBar(canvas, W, H)
