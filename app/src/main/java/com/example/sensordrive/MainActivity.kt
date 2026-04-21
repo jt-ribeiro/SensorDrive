@@ -2,8 +2,10 @@ package com.example.sensordrive
 
 import android.content.Context
 import android.hardware.*
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.PlaybackParams
+import android.media.SoundPool
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
@@ -15,9 +17,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var rotationSensor: Sensor? = null
     private var proximitySensor: Sensor? = null
 
-    // Controladores de Áudio
+    // Controladores de Áudio Contínuo
     private var bgMusic: MediaPlayer? = null
     private var carMusic: MediaPlayer? = null
+
+    // SoundPool para Efeitos Especiais (FX) Rápidos
+    private lateinit var soundPool: SoundPool
+    private var somEstrelaId = 0
+    private var somEmbateId = 0
+    private var somPerdeuId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,6 +33,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         setContentView(R.layout.activity_main)
 
         gameView = findViewById(R.id.gameView)
+
+        // Passar a referência da MainActivity para a GameView poder chamar os sons
+        gameView.setAudioController(this)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor  = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
@@ -34,15 +46,44 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun setupAudio() {
         try {
+            // Música de Fundo (Loop)
             bgMusic = MediaPlayer.create(this, R.raw.musica_fundo)
             bgMusic?.isLooping = true
             bgMusic?.setVolume(0.4f, 0.4f)
 
+            // Som do Motor (Loop) - A 75% conforme pedido
             carMusic = MediaPlayer.create(this, R.raw.car_sound)
             carMusic?.isLooping = true
-            carMusic?.setVolume(0.8f, 0.8f)
+            carMusic?.setVolume(0.75f, 0.75f)
+
+            // Setup SoundPool para FX
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_GAME)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
+            soundPool = SoundPool.Builder()
+                .setMaxStreams(5) // Pode tocar até 5 sons ao mesmo tempo
+                .setAudioAttributes(audioAttributes)
+                .build()
+
+            // Carregar sons curtos (devem estar na pasta res/raw)
+            somEstrelaId = soundPool.load(this, R.raw.estrela_coletada, 1)
+            somEmbateId = soundPool.load(this, R.raw.embate, 1)
+            somPerdeuId = soundPool.load(this, R.raw.perdeu, 1)
+
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    // Função que será chamada pela GameView
+    fun playSoundFX(type: String) {
+        when (type) {
+            "ESTRELA" -> soundPool.play(somEstrelaId, 1f, 1f, 1, 0, 1f)
+            "EMBATE_NORMAL" -> soundPool.play(somEmbateId, 1f, 1f, 1, 0, 1f)
+            "EMBATE_ROXO" -> soundPool.play(somEmbateId, 1f, 1f, 1, 0, 1.5f) // Pitch +50%
+            "PERDEU" -> soundPool.play(somPerdeuId, 1f, 1f, 1, 0, 1f)
         }
     }
 
@@ -58,16 +99,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 gameView.updateSensor(roll)
 
                 // ── ÁUDIO 3D (STEREO PANNING) ──
-                // Lê a direção do carro atual (de -1 a 1)
                 val steer = gameView.getCurrentSteer()
 
-                // Se steer = -1 (Esquerda total): Esquerdo fica 1.0, Direito fica 0.2
-                // Se steer = 1 (Direita total): Esquerdo fica 0.2, Direito fica 1.0
-                var leftVol = 0.8f - (steer * 0.6f)
-                var rightVol = 0.8f + (steer * 0.6f)
+                var leftVol = 0.75f - (steer * 0.5f)
+                var rightVol = 0.75f + (steer * 0.5f)
 
-                leftVol = leftVol.coerceIn(0.1f, 1.0f)
-                rightVol = rightVol.coerceIn(0.1f, 1.0f)
+                leftVol = leftVol.coerceIn(0.1f, 0.75f)
+                rightVol = rightVol.coerceIn(0.1f, 0.75f)
 
                 carMusic?.setVolume(leftVol, rightVol)
             }
@@ -106,6 +144,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onDestroy()
         bgMusic?.release()
         carMusic?.release()
+        soundPool.release()
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

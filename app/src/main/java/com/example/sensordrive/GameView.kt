@@ -7,8 +7,15 @@ import android.view.MotionEvent
 import android.view.SurfaceView
 import kotlin.math.*
 import kotlin.random.Random
+import android.content.SharedPreferences
 
 class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), Runnable {
+
+    // Controlador para tocar os sons na MainActivity
+    private var audioController: MainActivity? = null
+    fun setAudioController(controller: MainActivity) {
+        audioController = controller
+    }
 
     // ── Thread & State ──────────────────────────────────────────────
     private var gameThread: Thread? = null
@@ -30,7 +37,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
 
-    // Tinta especial para pintar os cones roxos "tóxicos"
     private val purpleConePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         colorFilter = LightingColorFilter(Color.parseColor("#FF00FF"), 0x000000)
     }
@@ -58,7 +64,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var distanceSpeedMultiplier = 1.0f
     private var nextDistanceThreshold = 5000f
 
-    // Timer para o obstáculo de confusão (inversão)
     private var confusionEndTime = 0L
 
     private val prefs = context.getSharedPreferences("SensorDrivePrefs", Context.MODE_PRIVATE)
@@ -69,10 +74,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private lateinit var phoneIcon: Bitmap
     private lateinit var nitroIcon: Bitmap
     private lateinit var starIcon: Bitmap
-
-    private val bgGif: Movie? by lazy {
-        try { resources.openRawResource(R.raw.fundo).use { Movie.decodeStream(it) } } catch (e: Exception) { null }
-    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -115,18 +116,15 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var steerInput = 0f
     private val FILTER_ALPHA = 0.15f
     private val DEADZONE     = 0.03f
-    private val MAX_TILT     = 0.40f
+    private val MAX_TILT     = 0.35f
 
-    // Getter para a MainActivity ler o panning do áudio
     fun getCurrentSteer(): Float = steerInput
 
     fun updateSensor(raw: Float) {
         rawRoll = raw
         if (isGameOver || isCalibrating || isPaused) return
 
-        var delta = rawRoll - rollOffset
-        while (delta > Math.PI) delta -= (2 * Math.PI).toFloat()
-        while (delta < -Math.PI) delta += (2 * Math.PI).toFloat()
+        val delta = rawRoll - rollOffset
 
         sensorFiltered += FILTER_ALPHA * (delta - sensorFiltered)
 
@@ -136,11 +134,10 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             else -> 0f
         }
 
-        var finalSteer = (afterDz / (MAX_TILT - DEADZONE)).coerceIn(-1f, 1f)
+        var finalSteer = (afterDz / MAX_TILT).coerceIn(-1f, 1f)
 
-        // ── INVERSÃO DE CONTROLOS (CONFUSÃO) ──
         if (System.currentTimeMillis() < confusionEndTime) {
-            finalSteer *= -1f // Troca a esquerda pela direita!
+            finalSteer *= -1f
         }
 
         steerInput = finalSteer
@@ -159,7 +156,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private var currentStreak = 0
     private var longestStreak = 0
 
-    // Modificado para suportar o tipo de Cone
     private data class Cone(var x: Float, var y: Float, val isPurple: Boolean, var hit: Boolean = false, var passed: Boolean = false)
     private val cones = mutableListOf<Cone>()
     private var coneSpawnTimer = 0
@@ -210,7 +206,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 rollOffset = rawRoll; sensorFiltered = 0f; steerInput = 0f; isCalibrating = false
                 return true
             }
-            else -> { if (isInRect(x, y, W-80f, 120f, 60f, 60f)) { openMenu(); return true } }
+            else -> { if (isInRect(x, y, W-80f, 20f, 60f, 60f)) { openMenu(); return true } }
         }
         return super.onTouchEvent(event)
     }
@@ -330,7 +326,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         if (coneSpawnTimer <= 0) {
             val spawnLeft = W * 0.15f
             val spawnRight = W * 0.85f - coneBitmap.width
-            // 15% de chance de ser um cone tóxico
             val isPurple = rng.nextInt(100) < 15
             cones.add(Cone(spawnLeft + rng.nextFloat() * (spawnRight - spawnLeft), -100f, isPurple))
             val baseTime = 60 - minOf(score / 50, 45)
@@ -344,26 +339,34 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         }
 
         val carCY = H * 0.8f
-        carRect.set(carX+12f, carCY+18f, carX+carBitmap.width-12f, carCY+carBitmap.height-10f)
+        carRect.set(carX + 12f, carCY + 12f, carX + carBitmap.width - 12f, carCY + carBitmap.height - 12f)
 
-        for (i in bonusStars.indices.reversed()) {
-            val s = bonusStars[i]
+        val starIter = bonusStars.iterator()
+        while (starIter.hasNext()) {
+            val s = starIter.next()
             s.y += (gameSpeed + 4f) * speedMultiplier * distanceSpeedMultiplier
-            if (s.y > H) { bonusStars.removeAt(i); continue }
-
+            if (s.y > H) {
+                starIter.remove()
+                continue
+            }
             if (!s.hit) {
                 objRect.set(s.x, s.y, s.x+starIcon.width, s.y+starIcon.height)
                 if (RectF.intersects(carRect, objRect)) {
                     s.hit = true
-                    bonusStars.removeAt(i)
+                    starIter.remove()
+
+                    // ── SOM: ESTRELA ──
+                    audioController?.playSoundFX("ESTRELA")
+
                     bonusNitroEndTime = System.currentTimeMillis() + 5000L
                     popups.add(Popup("NITRO 5s!", cyan, carX+carBitmap.width/2f, carCY-40f, 60))
                 }
             }
         }
 
-        for (i in cones.indices.reversed()) {
-            val c = cones[i]
+        val coneIter = cones.iterator()
+        while (coneIter.hasNext()) {
+            val c = coneIter.next()
             c.y += (gameSpeed + 4f) * speedMultiplier * distanceSpeedMultiplier
 
             if (!c.passed && !c.hit && c.y > carCY + carBitmap.height) {
@@ -374,26 +377,36 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 popups.add(Popup("+$bonus", neonGreen, c.x + coneBitmap.width/2f, c.y - 40f, 38))
             }
 
-            if (c.y > H + coneBitmap.height) { cones.removeAt(i); continue }
+            if (c.y > H + coneBitmap.height) {
+                coneIter.remove()
+                continue
+            }
 
             if (!c.hit) {
                 objRect.set(c.x+8f, c.y+8f, c.x+coneBitmap.width-8f, c.y+coneBitmap.height-8f)
                 if (RectF.intersects(carRect, objRect)) {
                     c.hit = true
-                    cones.removeAt(i)
+                    coneIter.remove()
                     currentStreak = 0
 
                     if (c.isPurple) {
-                        // Bateu no cone roxo: Sensores invertidos!
+                        // ── SOM: EMBATE CONE ROXO (+50% Pitch) ──
+                        audioController?.playSoundFX("EMBATE_ROXO")
+
                         confusionEndTime = System.currentTimeMillis() + 3000L
-                        popups.add(Popup("CUIDADO!", magenta, carX+carBitmap.width/2f, carCY-20f, 50))
+                        popups.add(Popup("ALERTA: INVERTIDO", magenta, carX+carBitmap.width/2f, carCY-20f, 50))
                     } else {
-                        // Bateu no cone normal: Perde vida
+                        // ── SOM: EMBATE CONE NORMAL ──
+                        audioController?.playSoundFX("EMBATE_NORMAL")
+
                         lives--
                         flashFrames = 12
                         popups.add(Popup("DANO!", neonRed, carX+carBitmap.width/2f, carCY-20f, 40))
 
                         if (lives <= 0) {
+                            // ── SOM: PERDEU AS VIDAS (GAME OVER) ──
+                            audioController?.playSoundFX("PERDEU")
+
                             isGameOver = true
                             saveHiScore()
                             return
@@ -403,10 +416,12 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
             }
         }
 
-        for (i in popups.indices.reversed()) {
-            val p = popups[i]
-            p.y -= 1.8f; p.life--
-            if (p.life <= 0) popups.removeAt(i)
+        val popupIter = popups.iterator()
+        while (popupIter.hasNext()) {
+            val p = popupIter.next()
+            p.y -= 1.8f
+            p.life--
+            if (p.life <= 0) popupIter.remove()
         }
     }
 
@@ -423,9 +438,15 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
                 windLines.add(WindLine(ox, oy, ang, rng.nextFloat()*4f+2.5f, rng.nextFloat()*55f+25f, if (rng.nextBoolean()) cyan else magenta, 0, ml, ml))
             }
         }
-        for (i in windLines.indices.reversed()) {
-            val wl = windLines[i]
-            if (--wl.life <= 0) { windLines.removeAt(i); continue }
+
+        val windIter = windLines.iterator()
+        while (windIter.hasNext()) {
+            val wl = windIter.next()
+            wl.life--
+            if (wl.life <= 0) {
+                windIter.remove()
+                continue
+            }
             wl.speed = (wl.speed*1.055f).coerceAtMost(60f)
             wl.x += cos(wl.angle)*wl.speed; wl.y += sin(wl.angle)*wl.speed
             val lr = wl.life.toFloat()/wl.maxLife
@@ -441,18 +462,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     private fun drawFrame(canvas: Canvas) {
         val W = width.toFloat(); val H = height.toFloat()
 
-        if (bgGif != null) {
-            val now = android.os.SystemClock.uptimeMillis()
-            val dur = if (bgGif!!.duration() == 0) 1000 else bgGif!!.duration()
-            bgGif!!.setTime((now % dur).toInt())
-            val scale = maxOf(W / bgGif!!.width(), H / bgGif!!.height())
-            canvas.save(); canvas.scale(scale, scale)
-            bgGif!!.draw(canvas, (W / scale - bgGif!!.width()) / 2f, (H / scale - bgGif!!.height()) / 2f)
-            canvas.restore()
-        } else {
-            canvas.drawColor(darkBg)
-        }
-
+        canvas.drawColor(darkBg)
         drawRoad(canvas, W, H)
 
         when {
@@ -503,7 +513,6 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
 
         for (i in cones.indices) {
             val c = cones[i]
-            // Se for cone roxo, usa o paint modificado
             if (c.isPurple) {
                 canvas.drawBitmap(coneBitmap, c.x, c.y, purpleConePaint)
             } else {
@@ -581,9 +590,14 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         hudLbl(canvas,"VELOC.",W-182f,50f,magenta)
         hudVal(canvas,"$kmh km/h",W-182f,84f)
 
-        pixelPaint.textSize = 30f
+        pixelPaint.textSize = 24f
         pixelPaint.color = neonYellow
-        canvas.drawText("ENERGIA: ${"⚡".repeat(lives)}", 30f, 130f, pixelPaint)
+        canvas.drawText("ENERGIA:", 30f, 135f, pixelPaint)
+        paint.style = Paint.Style.FILL
+        paint.color = neonYellow
+        for (i in 0 until lives) {
+            canvas.drawRect(140f + (i * 30f), 115f, 160f + (i * 30f), 135f, paint)
+        }
 
         drawNitroBar(canvas, W, H)
 
@@ -600,7 +614,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
         val confusionTimeLeft = confusionEndTime - System.currentTimeMillis()
         if (confusionTimeLeft > 0) {
             pixelPaint.color = magenta
-            canvas.drawText("⚠️ INVERTIDO: ${confusionTimeLeft/1000}s ⚠️", W/2f, H*0.32f, pixelPaint)
+            canvas.drawText("ALERTA: INVERTIDO ${confusionTimeLeft/1000}s", W/2f, H*0.32f, pixelPaint)
         }
         pixelPaint.textAlign = Paint.Align.LEFT
     }
@@ -623,7 +637,7 @@ class GameView(context: Context, attrs: AttributeSet) : SurfaceView(context, att
     }
 
     private fun drawMenuBtn(canvas: Canvas, W: Float) {
-        val bx=W-78f; val by=120f; val bs=56f
+        val bx=W-78f; val by=20f; val bs=56f
         paint.style=Paint.Style.FILL; paint.color=Color.argb(180,0,0,20); canvas.drawRect(bx,by,bx+bs,by+bs,paint)
         paint.style=Paint.Style.STROKE; paint.strokeWidth=2f; paint.color=cyan; canvas.drawRect(bx,by,bx+bs,by+bs,paint)
         paint.style=Paint.Style.FILL; paint.color=cyan
